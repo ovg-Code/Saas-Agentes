@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentes.dev/schema/release.schema.json",
+  "title": "Release de agente (resuelto e inmutable)",
+  "description": "Capa 4: lo genera la plataforma a partir de plantilla + conectores + despliegue. Es el ÚNICO contrato entre plano de control (TS) y runtime (Python).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "tenant", "agent", "template", "autonomy", "model", "instructions", "procedures", "tools", "connectors", "guardrails", "channels", "params"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^rel_[0-9a-f]{16}$" },
+    "tenant": { "type": "object", "required": ["slug"], "properties": { "slug": { "type": "string" }, "name": { "type": "string" } } },
+    "agent": { "type": "object", "required": ["slug", "name"], "properties": { "slug": { "type": "string" }, "name": { "type": "string" } } },
+    "template": { "type": "object", "required": ["id", "version"], "properties": { "id": { "type": "string" }, "version": { "type": "string" } } },
+    "autonomy": { "enum": ["L1", "L2", "L3", "L4", "L5"] },
+    "model": { "type": "object", "required": ["alias", "max_tokens"], "properties": { "alias": { "type": "string" }, "max_tokens": { "type": "integer" } } },
+    "instructions": { "type": "string" },
+    "procedures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "when", "content"],
+        "properties": { "id": { "type": "string" }, "title": { "type": "string" }, "when": { "type": "string" }, "content": { "type": "string" } }
+      }
+    },
+    "tools": { "type": "array", "items": { "$ref": "#/$defs/tool" } },
+    "connectors": { "type": "object", "additionalProperties": { "$ref": "#/$defs/connector" } },
+    "guardrails": {
+      "type": "object",
+      "required": ["max_steps_per_turn", "blocked_topics", "untrusted_input"],
+      "properties": {
+        "max_steps_per_turn": { "type": "integer" },
+        "blocked_topics": { "type": "array", "items": { "type": "string" } },
+        "untrusted_input": { "type": "boolean" },
+        "max_cost_usd_per_conversation": { "type": "number" }
+      }
+    },
+    "channels": { "type": "array", "items": { "type": "string" } },
+    "params": { "type": "object" },
+    "knowledge_sources": { "type": "array", "items": { "type": "string" } },
+    "webhooks": { "type": "array" }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "capability", "description", "tier", "approval", "input_schema", "binding"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-zA-Z0-9_-]{1,64}$" },
+        "capability": { "type": "string" },
+        "description": { "type": "string" },
+        "tier": { "enum": ["read", "write", "irreversible", "financial"] },
+        "approval": { "enum": ["auto", "ask"], "description": "Decisión efectiva ya calculada (autonomía x tier x overrides)." },
+        "input_schema": { "type": "object" },
+        "binding": {
+          "oneOf": [
+            { "type": "object", "required": ["kind", "name"], "properties": { "kind": { "const": "builtin" }, "name": { "type": "string" } } },
+            {
+              "type": "object",
+              "required": ["kind", "connector", "method", "path", "params", "has_body"],
+              "properties": {
+                "kind": { "const": "http" },
+                "connector": { "type": "string" },
+                "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+                "path": { "type": "string" },
+                "params": { "type": "array", "items": { "type": "object", "required": ["name", "in"], "properties": { "name": { "type": "string" }, "in": { "enum": ["path", "query", "header"] }, "required": { "type": "boolean" } } } },
+                "has_body": { "type": "boolean" }
+              }
+            },
+            { "type": "object", "required": ["kind", "connector", "tool"], "properties": { "kind": { "const": "mcp" }, "connector": { "type": "string" }, "tool": { "type": "string" } } }
+          ]
+        }
+      }
+    },
+    "connector": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["openapi", "mcp"] },
+        "base_url": { "type": "string" },
+        "url": { "type": "string" },
+        "auth": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "enum": ["none", "api_key", "bearer", "basic"] },
+            "header": { "type": "string" },
+            "credential_ref": { "type": "string", "description": "Referencia a la bóveda. El runtime la canjea en el momento de ejecutar; el LLM nunca la ve." }
+          }
+        }
+      }
+    }
+  }
+}

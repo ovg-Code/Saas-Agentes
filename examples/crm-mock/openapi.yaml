@@ -1,0 +1,65 @@
+openapi: 3.0.3
+info:
+  title: CRM López (mock)
+  version: 1.0.0
+  description: CRM "propio" de un cliente ficticio. Sirve para probar el importador OpenAPI -> tools.
+servers:
+  - url: http://localhost:9090
+components:
+  securitySchemes:
+    apiKey: { type: apiKey, in: header, name: X-API-Key }
+  schemas:
+    Ticket:
+      type: object
+      required: [asunto, descripcion]
+      properties:
+        asunto: { type: string }
+        descripcion: { type: string }
+        email_cliente: { type: string }
+        numero_pedido: { type: string, nullable: true }
+        prioridad: { type: string, enum: [baja, normal, alta] }
+security:
+  - apiKey: []
+paths:
+  /clientes:
+    get:
+      operationId: buscarClientes
+      summary: Buscar clientes por email o teléfono
+      parameters:
+        - { name: email, in: query, schema: { type: string } }
+        - { name: telefono, in: query, schema: { type: string } }
+      responses: { "200": { description: Lista de clientes } }
+  /pedidos/{numero}:
+    get:
+      operationId: obtenerPedido
+      summary: Obtener el estado de un pedido
+      parameters:
+        - { name: numero, in: path, required: true, schema: { type: string }, description: Número de pedido }
+      responses: { "200": { description: Pedido }, "404": { description: No existe } }
+  /pedidos/{numero}/reembolso:
+    post:
+      operationId: reembolsarPedido
+      summary: Emitir un reembolso
+      parameters:
+        - { name: numero, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [motivo]
+              properties:
+                motivo: { type: string }
+                importe: { type: number }
+      responses: { "200": { description: Reembolso emitido } }
+  /tickets:
+    post:
+      operationId: crearTicket
+      summary: Crear un ticket de soporte
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Ticket" }
+      responses: { "201": { description: Ticket creado } }

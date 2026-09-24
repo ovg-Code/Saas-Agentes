@@ -1,0 +1,41 @@
+# Capa 3 — despliegue de un cliente. Esto es TODO lo que hay que escribir para un cliente nuevo.
+# Uso:  CRM_LOPEZ_API_KEY=crm-demo-key pnpm agentes deploy examples/clientes/ferreteria-lopez.yaml
+tenant:
+  slug: ferreteria-lopez
+  name: Ferretería López
+agent:
+  slug: soporte
+  name: Asistente de Ferretería López
+template: atencion-cliente@^1.0
+
+params:
+  empresa: Ferretería López
+  sector: ferretería y bricolaje
+  tono: cercano
+  horario: "lunes a sábado de 9:00 a 14:00"
+
+# Su CRM propio: basta con su OpenAPI. La CLI lo importa y genera las tools.
+connectors:
+  - id: crm-lopez
+    type: openapi
+    spec: ../crm-mock/openapi.yaml
+    base_url: http://localhost:9090
+    auth: { type: api_key, header: X-API-Key, credential: crm-lopez-key }
+
+# Capacidad abstracta de la plantilla -> operación concreta de SU sistema.
+bindings:
+  crm.buscar_cliente: { connector: crm-lopez, operation: buscarClientes }
+  pedidos.consultar: { connector: crm-lopez, operation: "GET /pedidos/{numero}" }
+  tickets.crear: { connector: crm-lopez, operation: crearTicket }
+  pedidos.reembolsar: { connector: crm-lopez, operation: reembolsarPedido }
+
+# Nunca secretos en claro: la CLI lee la variable y la sube cifrada a la bóveda.
+credentials:
+  crm-lopez-key: { from_env: CRM_LOPEZ_API_KEY }
+
+knowledge:
+  - source: ./ferreteria-lopez-faq.md
+    title: FAQ Ferretería López
+
+channels: [widget, api, mcp]
+autonomy: L3

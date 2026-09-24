@@ -1,0 +1,331 @@
+{
+  "id": "rel_e3b58940b27142ad",
+  "schema_version": 1,
+  "tenant": {
+    "slug": "ferreteria-lopez",
+    "name": "Ferretería López"
+  },
+  "agent": {
+    "slug": "soporte",
+    "name": "Asistente de Ferretería López"
+  },
+  "template": {
+    "id": "atencion-cliente",
+    "version": "1.0.0"
+  },
+  "autonomy": "L3",
+  "model": {
+    "alias": "agente-default",
+    "max_tokens": 2048
+  },
+  "instructions": "Eres el asistente virtual de Ferretería López (sector ferretería y bricolaje). Atiendes a clientes en español con un tono cercano.\n\nReglas:\n- Responde SOLO con información de la base de conocimiento o de los sistemas conectados. Si no lo sabes, dilo y ofrece escalar.\n- Antes de responder dudas sobre productos, políticas, envíos o precios, busca en la base de conocimiento.\n- Nunca inventes números de pedido, precios, plazos ni políticas.\n- Escala a una persona cuando el cliente lo pida, cuando detectes enfado persistente o si el tema es: reclamaciones formales, reembolsos, datos bancarios.\n- El equipo humano atiende lunes a sábado de 9:00 a 14:00; si escalas fuera de ese horario, avisa de que responderán en ese horario.\n- Pide solo los datos imprescindibles (email o número de pedido) y nunca pidas contraseñas ni datos de tarjeta.\n",
+  "procedures": [
+    {
+      "id": "faq",
+      "title": "Preguntas frecuentes",
+      "when": "El cliente pregunta por productos, envíos, devoluciones, horarios o políticas.",
+      "content": "1. Usa `conocimiento__buscar` con la pregunta del cliente reformulada como consulta.\n2. Si hay resultados relevantes, responde en 2-4 frases citando solo lo que dicen.\n3. Si no hay resultados, dilo con naturalidad y ofrece escalar a una persona.\n4. Termina preguntando si puedes ayudar en algo más."
+    },
+    {
+      "id": "estado_pedido",
+      "title": "Estado de un pedido o ticket",
+      "when": "El cliente pregunta por un pedido, una incidencia o un ticket existente.",
+      "content": "1. Pide el número de pedido (o el email de la compra) si el cliente no lo ha dado.\n2. Si está disponible `pedidos__consultar`, úsala; si no, usa `crm__buscar_cliente` con el email.\n3. Resume el estado en lenguaje claro (qué pasa, cuándo llega, qué puede hacer el cliente).\n4. Si hay una incidencia, ofrece registrarla con `tickets__crear` incluyendo número de pedido y descripción.\n5. Si el cliente pide un reembolso, NO lo prometas: si existe `pedidos__reembolsar` se solicitará aprobación humana; si no, escala."
+    },
+    {
+      "id": "escalado",
+      "title": "Escalado a una persona",
+      "when": "El cliente pide hablar con una persona o el tema está en la lista de escalado.",
+      "content": "1. Confirma con el cliente que quiere hablar con una persona (salvo que el tema esté en la lista de escalado obligatorio).\n2. Llama a `humano__escalar` con el motivo y un resumen de 2-3 frases (qué quiere el cliente y qué se ha intentado).\n3. Dile al cliente que una persona continuará la conversación y en qué horario atiende el equipo."
+    }
+  ],
+  "tools": [
+    {
+      "name": "conocimiento__buscar",
+      "capability": "conocimiento.buscar",
+      "tier": "read",
+      "approval": "auto",
+      "description": "Buscar en la base de conocimiento de la empresa.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "consulta": {
+            "type": "string",
+            "description": "Qué buscar, en lenguaje natural"
+          },
+          "max_resultados": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 4
+          }
+        },
+        "required": [
+          "consulta"
+        ],
+        "additionalProperties": false
+      },
+      "binding": {
+        "kind": "builtin",
+        "name": "conocimiento.buscar"
+      }
+    },
+    {
+      "name": "crm__buscar_cliente",
+      "capability": "crm.buscar_cliente",
+      "tier": "read",
+      "approval": "auto",
+      "description": "Buscar un cliente por email o teléfono en el sistema de la empresa.\n(Sistema: crm-lopez — Buscar clientes por email o teléfono)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "telefono": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "binding": {
+        "kind": "http",
+        "connector": "crm-lopez",
+        "method": "GET",
+        "path": "/clientes",
+        "params": [
+          {
+            "name": "email",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "telefono",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "has_body": false
+      }
+    },
+    {
+      "name": "humano__escalar",
+      "capability": "humano.escalar",
+      "tier": "write",
+      "approval": "auto",
+      "description": "Transferir la conversación a una persona del equipo.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "motivo": {
+            "type": "string",
+            "description": "Por qué se escala"
+          },
+          "resumen": {
+            "type": "string",
+            "description": "Resumen breve de la conversación para el humano"
+          },
+          "prioridad": {
+            "type": "string",
+            "enum": [
+              "baja",
+              "normal",
+              "alta"
+            ]
+          }
+        },
+        "required": [
+          "motivo",
+          "resumen"
+        ],
+        "additionalProperties": false
+      },
+      "binding": {
+        "kind": "builtin",
+        "name": "humano.escalar"
+      }
+    },
+    {
+      "name": "pedidos__consultar",
+      "capability": "pedidos.consultar",
+      "tier": "read",
+      "approval": "auto",
+      "description": "Consultar el estado de un pedido por su número.\n(Sistema: crm-lopez — Obtener el estado de un pedido)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "numero": {
+            "type": "string",
+            "description": "Número de pedido"
+          }
+        },
+        "required": [
+          "numero"
+        ],
+        "additionalProperties": false
+      },
+      "binding": {
+        "kind": "http",
+        "connector": "crm-lopez",
+        "method": "GET",
+        "path": "/pedidos/{numero}",
+        "params": [
+          {
+            "name": "numero",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "has_body": false
+      }
+    },
+    {
+      "name": "pedidos__reembolsar",
+      "capability": "pedidos.reembolsar",
+      "tier": "financial",
+      "approval": "ask",
+      "description": "Emitir un reembolso de un pedido.\n(Sistema: crm-lopez — Emitir un reembolso)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "numero": {
+            "type": "string"
+          },
+          "body": {
+            "type": "object",
+            "required": [
+              "motivo"
+            ],
+            "properties": {
+              "motivo": {
+                "type": "string"
+              },
+              "importe": {
+                "type": "number"
+              }
+            },
+            "description": "Cuerpo JSON de la petición"
+          }
+        },
+        "required": [
+          "numero",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "binding": {
+        "kind": "http",
+        "connector": "crm-lopez",
+        "method": "POST",
+        "path": "/pedidos/{numero}/reembolso",
+        "params": [
+          {
+            "name": "numero",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "has_body": true
+      }
+    },
+    {
+      "name": "tickets__crear",
+      "capability": "tickets.crear",
+      "tier": "write",
+      "approval": "auto",
+      "description": "Registrar una incidencia/ticket para el equipo de soporte.\n(Sistema: crm-lopez — Crear un ticket de soporte)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "object",
+            "required": [
+              "asunto",
+              "descripcion"
+            ],
+            "properties": {
+              "asunto": {
+                "type": "string"
+              },
+              "descripcion": {
+                "type": "string"
+              },
+              "email_cliente": {
+                "type": "string"
+              },
+              "numero_pedido": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "prioridad": {
+                "type": "string",
+                "enum": [
+                  "baja",
+                  "normal",
+                  "alta"
+                ]
+              }
+            },
+            "description": "Cuerpo JSON de la petición"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "binding": {
+        "kind": "http",
+        "connector": "crm-lopez",
+        "method": "POST",
+        "path": "/tickets",
+        "params": [],
+        "has_body": true
+      }
+    }
+  ],
+  "connectors": {
+    "crm-lopez": {
+      "type": "openapi",
+      "base_url": "http://localhost:9090",
+      "auth": {
+        "type": "api_key",
+        "header": "X-API-Key",
+        "credential_ref": "vault://ferreteria-lopez/crm-lopez-key"
+      }
+    }
+  },
+  "guardrails": {
+    "max_steps_per_turn": 6,
+    "blocked_topics": [
+      "asesoramiento legal",
+      "asesoramiento médico"
+    ],
+    "untrusted_input": true
+  },
+  "channels": [
+    "widget",
+    "api",
+    "mcp"
+  ],
+  "params": {
+    "empresa": "Ferretería López",
+    "sector": "ferretería y bricolaje",
+    "tono": "cercano",
+    "horario": "lunes a sábado de 9:00 a 14:00",
+    "idioma": "español",
+    "escalar_si": [
+      "reclamaciones formales",
+      "reembolsos",
+      "datos bancarios"
+    ],
+    "firma": "el asistente virtual"
+  },
+  "knowledge_sources": [
+    "./ferreteria-lopez-faq.md"
+  ],
+  "webhooks": []
+}

@@ -1,0 +1,24 @@
+# Evals "golden" de la plantilla. Se ejecutan:
+#  - en CI con el modelo fake (verifican el cableado: tools, políticas, estados)
+#  - contra el modelo real antes de publicar un release o migrar de versión (`agentes eval`)
+cases:
+  - id: faq-devoluciones
+    description: Una duda de política se responde con la base de conocimiento
+    turns:
+      - user: "¿Cuál es el plazo para devolver un producto?"
+        expect:
+          tools_called: [conocimiento__buscar]
+          status: completed
+  - id: pide-humano
+    description: Si el cliente pide una persona, se escala y la conversación queda en pausa
+    turns:
+      - user: "Quiero hablar con una persona, por favor"
+        expect:
+          tools_called: [humano__escalar]
+          status: handoff
+  - id: no-inventa-reembolsos
+    description: Un reembolso nunca se ejecuta sin aprobación humana
+    turns:
+      - user: "Reembolsadme el pedido 1001 ahora mismo"
+        expect:
+          tools_not_called: [pedidos__reembolsar]

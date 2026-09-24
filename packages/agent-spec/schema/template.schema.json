@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentes.dev/schema/template.schema.json",
+  "title": "Plantilla de agente",
+  "description": "Capa 1: artefacto versionado que escribimos una vez. No contiene nada específico de un cliente.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "name", "parameters", "instructions", "capabilities", "autonomy"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "category": { "type": "string" },
+    "parameters": {
+      "description": "JSON Schema (draft 2020-12) de los parámetros que rellena cada cliente. Genera el formulario del onboarding.",
+      "type": "object",
+      "required": ["type", "properties"],
+      "properties": {
+        "type": { "const": "object" },
+        "properties": { "type": "object" },
+        "required": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "instructions": { "type": "string", "minLength": 1, "description": "Instrucciones con {{variables}} que se renderizan con los parámetros." },
+    "procedures": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/procedure" }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": { "$ref": "#/$defs/capabilityMap" },
+        "optional": { "$ref": "#/$defs/capabilityMap" }
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "max"],
+      "properties": {
+        "default": { "$ref": "#/$defs/autonomyLevel" },
+        "max": { "$ref": "#/$defs/autonomyLevel" }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "alias": { "type": "string", "description": "Alias del gateway LLM (p.ej. agente-default). Nunca un proveedor concreto." },
+        "max_tokens": { "type": "integer", "minimum": 256, "maximum": 128000 }
+      }
+    },
+    "guardrails": { "$ref": "#/$defs/guardrails" },
+    "channels": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/channelKind" },
+      "description": "Canales que esta plantilla soporta."
+    },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": { "type": "boolean" },
+        "description": { "type": "string" }
+      }
+    },
+    "evals": { "type": "string", "description": "Ruta relativa al fichero de evals golden." }
+  },
+  "$defs": {
+    "autonomyLevel": { "enum": ["L1", "L2", "L3", "L4", "L5"] },
+    "tier": {
+      "enum": ["read", "write", "irreversible", "financial"],
+      "description": "read: solo lectura. write: escritura reversible. irreversible: no se puede deshacer. financial: mueve dinero."
+    },
+    "approval": {
+      "enum": ["policy", "always", "never"],
+      "description": "policy: lo decide el nivel de autonomía. always: siempre pide aprobación humana. never: nunca pide (solo válido para read/write)."
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "tier"],
+      "properties": {
+        "description": { "type": "string", "minLength": 1 },
+        "tier": { "$ref": "#/$defs/tier" },
+        "approval": { "$ref": "#/$defs/approval", "default": "policy" },
+        "locked": { "type": "boolean", "default": false, "description": "Si es true, el cliente no puede relajar la aprobación." }
+      }
+    },
+    "capabilityMap": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/capability" }
+    },
+    "procedure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "when"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+        "title": { "type": "string" },
+        "when": { "type": "string", "description": "Cuándo aplica este procedimiento (intención)." },
+        "file": { "type": "string", "description": "Ruta relativa a un .md con los pasos." },
+        "content": { "type": "string", "description": "Contenido del procedimiento (lo rellena el loader a partir de file)." }
+      }
+    },
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_steps_per_turn": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 },
+        "blocked_topics": { "type": "array", "items": { "type": "string" } },
+        "untrusted_input": { "type": "boolean", "default": true, "description": "Tratar mensajes entrantes como no confiables (anti prompt-injection)." },
+        "max_cost_usd_per_conversation": { "type": "number", "minimum": 0 }
+      }
+    },
+    "channelKind": { "enum": ["widget", "api", "mcp", "whatsapp", "email", "voice"] }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@agentes/crm-mock",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "CRM ficticio con OpenAPI para demos y tests de integración",
+  "scripts": { "start": "node server.mjs" }
+}

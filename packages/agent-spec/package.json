@@ -1,0 +1,27 @@
+{
+  "name": "@agentes/agent-spec",
+  "version": "0.1.0",
+  "description": "Formato de plantillas/despliegues/releases y resolución de las 4 capas de parametrización",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./schema/*": "./schema/*"
+  },
+  "files": ["dist", "schema"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "semver": "^7.6.3",
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "@types/semver": "^7.5.8"
+  }
+}
