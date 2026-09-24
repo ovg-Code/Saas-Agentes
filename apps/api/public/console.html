@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Consola de agentes</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1a1d21; --muted:#5f6670; --line:#e2e5e9; --accent:#2b59c3; --ok:#1f8a4c; --warn:#b26b00; --bad:#c0392b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161a; --card:#1d2025; --text:#e8eaed; --muted:#a0a6ae; --line:#30343a; --accent:#7aa2ff; --ok:#4cc38a; --warn:#f0b35a; --bad:#ff7b6b; } }
+  * { box-sizing:border-box } body { margin:0; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text) }
+  header { display:flex; gap:12px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); background:var(--card); flex-wrap:wrap }
+  header h1 { font-size:16px; margin:0 auto 0 0 } input, select, textarea { font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:6px 10px }
+  button { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:8px; padding:6px 12px; cursor:pointer } button.primary { background:var(--accent); border-color:var(--accent); color:#fff }
+  nav { display:flex; gap:4px; padding:8px 16px; overflow-x:auto } nav button.active { border-color:var(--accent); color:var(--accent) }
+  main { padding:16px; max-width:1100px; margin:0 auto } .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px }
+  table { width:100%; border-collapse:collapse } th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top } th { color:var(--muted); font-weight:500 }
+  .muted { color:var(--muted) } .tag { display:inline-block; padding:1px 8px; border-radius:99px; border:1px solid var(--line); font-size:12px }
+  .tag.pending, .tag.awaiting_approval { color:var(--warn); border-color:var(--warn) } .tag.handoff { color:var(--bad); border-color:var(--bad) } .tag.idle, .tag.approved { color:var(--ok); border-color:var(--ok) }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font-size:12px } .grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)) }
+  label { display:block; margin:10px 0 4px; font-weight:500 } .field input, .field select, .field textarea { width:100% } .msgs div { padding:6px 10px; margin:4px 0; border-radius:8px; background:var(--bg) }
+  .msgs .customer { border-left:3px solid var(--accent) } .msgs .human { border-left:3px solid var(--warn) } .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+  @media (max-width:640px) { table, tbody, tr, td { display:block } thead { display:none } td { border:0; padding:4px 0 } tr { border-bottom:1px solid var(--line); padding:8px 0 } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Consola de agentes</h1>
+  <input id="key" type="password" placeholder="API key de administración" size="28" aria-label="API key" />
+  <input id="tenant" placeholder="tenant_id (solo token de plataforma)" size="24" aria-label="tenant" />
+  <button class="primary" id="save">Guardar</button>
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const store = { get: (k) => { try { return localStorage.getItem(k) || ""; } catch { return ""; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+$("#key").value = store.get("agentes.key"); $("#tenant").value = store.get("agentes.tenant");
+$("#save").onclick = () => { store.set("agentes.key", $("#key").value.trim()); store.set("agentes.tenant", $("#tenant").value.trim()); show(current); };
+
+async function api(path, opts = {}) {
+  const t = store.get("agentes.tenant");
+  const url = t && !path.includes("tenant_id=") && opts.method !== "POST" ? path + (path.includes("?") ? "&" : "?") + "tenant_id=" + t : path;
+  const r = await fetch(url, { ...opts, headers: { "content-type": "application/json", authorization: "Bearer " + store.get("agentes.key"), ...(opts.headers || {}) } });
+  const data = r.status === 204 ? {} : await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+const tabs = { plantillas: "Plantillas y onboarding", agentes: "Agentes", aprobaciones: "Aprobaciones", conversaciones: "Conversaciones", probar: "Probar agente" };
+let current = "plantillas";
+$("#tabs").innerHTML = Object.entries(tabs).map(([k, v]) => `<button data-tab="${k}">${v}</button>`).join("");
+$("#tabs").onclick = (e) => { if (e.target.dataset.tab) show(e.target.dataset.tab); };
+
+async function show(tab) {
+  current = tab;
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  const view = $("#view");
+  view.innerHTML = '<p class="muted">Cargando…</p>';
+  try { await views[tab](view); } catch (e) { view.innerHTML = `<div class="card">⚠️ ${esc(e.message)}</div>`; }
+}
+
+// Formulario generado a partir del JSON Schema de parámetros de la plantilla (capa 1 -> capa 3).
+function fieldFor(name, schema, required) {
+  const label = `<label for="p-${name}">${esc(schema.title || name)}${required ? " *" : ""}</label>`;
+  if (schema.enum) return `<div class="field">${label}<select id="p-${name}" data-name="${name}">${schema.enum.map((o) => `<option ${o === schema.default ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>`;
+  if (schema.type === "array") return `<div class="field">${label}<input id="p-${name}" data-name="${name}" data-type="array" value="${esc((schema.default || []).join(", "))}" placeholder="separado por comas"/></div>`;
+  return `<div class="field">${label}<input id="p-${name}" data-name="${name}" value="${esc(schema.default ?? "")}"/></div>`;
+}
+
+function toYaml(obj, indent = "") {
+  return Object.entries(obj).map(([k, v]) => {
+    if (Array.isArray(v)) return `${indent}${k}: [${v.map((x) => JSON.stringify(x)).join(", ")}]`;
+    if (v && typeof v === "object") return `${indent}${k}:\n${toYaml(v, indent + "  ")}`;
+    return `${indent}${k}: ${JSON.stringify(v)}`;
+  }).join("\n");
+}
+
+const views = {
+  async plantillas(view) {
+    const { templates } = await api("/v1/templates");
+    view.innerHTML = `<div class="grid">${templates.map((t) => `<div class="card"><strong>${esc(t.name)}</strong> <span class="tag">${esc(t.id)}@${esc(t.version)}</span><p class="muted">${esc(t.description)}</p><button data-t="${esc(t.id)}">Configurar cliente</button></div>`).join("")}</div><div id="form"></div>`;
+    view.onclick = async (e) => {
+      if (!e.target.dataset.t) return;
+      const t = await api("/v1/templates/" + e.target.dataset.t);
+      const req = new Set(t.parameters.required || []);
+      $("#form", view).innerHTML = `<div class="card"><h3>Nuevo cliente: ${esc(t.name)}</h3>
+        <div class="row"><div class="field"><label>Slug del cliente *</label><input id="tslug" placeholder="ferreteria-lopez"/></div><div class="field"><label>Slug del agente</label><input id="aslug" value="soporte"/></div></div>
+        ${Object.entries(t.parameters.properties).map(([n, s]) => fieldFor(n, s, req.has(n))).join("")}
+        <label>Capacidades de la plantilla</label><table><thead><tr><th>Capacidad</th><th>Tier</th><th>Obligatoria</th></tr></thead><tbody>${t.capabilities.map((c) => `<tr><td>${esc(c.name)}<div class="muted">${esc(c.description)}</div></td><td>${esc(c.tier)}</td><td>${c.required ? "sí" : "opcional: enlázala a su sistema"}</td></tr>`).join("")}</tbody></table>
+        <p><button class="primary" id="gen">Generar cliente.yaml</button></p><pre id="yaml" hidden></pre>
+        <p class="muted">Guárdalo y despliega con: <code>pnpm agentes deploy cliente.yaml</code> (añade connectors/bindings si el cliente tiene CRM/ERP).</p></div>`;
+      $("#gen", view).onclick = () => {
+        const params = {};
+        view.querySelectorAll("[data-name]").forEach((el) => { const v = el.value.trim(); if (v) params[el.dataset.name] = el.dataset.type === "array" ? v.split(",").map((x) => x.trim()).filter(Boolean) : v; });
+        const slug = $("#tslug", view).value.trim() || "mi-cliente";
+        const doc = { tenant: { slug, name: params.empresa || slug }, agent: { slug: $("#aslug", view).value.trim() || "soporte" }, template: `${t.id}@^${t.version.split(".")[0]}.0`, params, knowledge: [{ source: "./faq.md" }], channels: ["widget", "api", "mcp"], autonomy: t.autonomy.default };
+        $("#yaml", view).hidden = false; $("#yaml", view).textContent = toYaml(doc) + "\n";
+      };
+    };
+  },
+  async agentes(view) {
+    const { agents } = await api("/v1/agents");
+    view.innerHTML = `<div class="card"><table><thead><tr><th>Agente</th><th>Plantilla</th><th>Release activo</th><th>Publicado</th></tr></thead><tbody>${agents.map((a) => `<tr><td><strong>${esc(a.name)}</strong><div class="muted">${esc(a.slug)} · ${esc(a.id)}</div></td><td>${esc(a.template_id)}@${esc(a.template_version)}</td><td><code>${esc(a.active_release_id)}</code></td><td>${esc(new Date(a.published_at).toLocaleString())}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">Sin agentes</td></tr>'}</tbody></table></div>`;
+  },
+  async aprobaciones(view) {
+    const { approvals } = await api("/v1/approvals?status=pending");
+    view.innerHTML = `<div class="card"><table><thead><tr><th>Acción</th><th>Datos</th><th></th></tr></thead><tbody>${approvals.map((a) => `<tr><td><strong>${esc(a.capability)}</strong> <span class="tag pending">${esc(a.tier)}</span><div class="muted">${esc(a.agent)} · ${esc(new Date(a.created_at).toLocaleString())}</div></td><td><pre>${esc(JSON.stringify(a.input, null, 2))}</pre></td><td class="row"><button class="primary" data-ok="${a.id}">Aprobar</button><button data-no="${a.id}">Rechazar</button></td></tr>`).join("") || '<tr><td colspan="3" class="muted">No hay acciones pendientes 🎉</td></tr>'}</tbody></table></div>`;
+    view.onclick = async (e) => {
+      const id = e.target.dataset.ok || e.target.dataset.no; if (!id) return;
+      const note = e.target.dataset.no ? prompt("Motivo del rechazo (opcional)") || undefined : undefined;
+      const r = await api("/v1/approvals/" + id, { method: "POST", body: JSON.stringify({ approve: Boolean(e.target.dataset.ok), by: "consola", note }) });
+      alert(r.reply ? "Respuesta al cliente:\n\n" + r.reply : "Decisión registrada"); show("aprobaciones");
+    };
+  },
+  async conversaciones(view) {
+    const { conversations } = await api("/v1/conversations");
+    view.innerHTML = `<div class="card"><table><thead><tr><th>Conversación</th><th>Estado</th><th>Último mensaje</th></tr></thead><tbody>${conversations.map((c) => `<tr><td><a href="#" data-c="${c.id}">${esc(c.id.slice(0, 8))}</a><div class="muted">${esc(c.agent)} · ${esc(c.channel)}</div></td><td><span class="tag ${esc(c.status)}">${esc(c.status)}</span></td><td>${esc((c.last_message || "").slice(0, 120))}</td></tr>`).join("") || '<tr><td colspan="3" class="muted">Sin conversaciones</td></tr>'}</tbody></table></div><div id="detail"></div>`;
+    view.onclick = async (e) => {
+      if (!e.target.dataset.c) return; e.preventDefault();
+      const c = await api("/v1/conversations/" + e.target.dataset.c);
+      $("#detail", view).innerHTML = `<div class="card"><h3>Conversación <span class="tag ${esc(c.status)}">${esc(c.status)}</span></h3><div class="msgs">${c.messages.map((m) => `<div class="${esc(m.role)}"><span class="muted">${esc(m.role)}:</span> ${esc(m.content)}</div>`).join("")}</div>
+        <label for="hr">Responder como persona del equipo</label><textarea id="hr" rows="2" style="width:100%"></textarea><p class="row"><button class="primary" id="send">Enviar</button><label><input type="checkbox" id="resume"/> devolver la conversación al agente</label></p></div>`;
+      $("#send", view).onclick = async () => { await api(`/v1/conversations/${c.id}/human-reply`, { method: "POST", body: JSON.stringify({ text: $("#hr", view).value, resume_bot: $("#resume", view).checked, by: "consola" }) }); show("conversaciones"); };
+    };
+  },
+  async probar(view) {
+    const { agents } = await api("/v1/agents");
+    let conv = null;
+    view.innerHTML = `<div class="card"><div class="row"><select id="ag">${agents.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join("")}</select><button id="new">Nueva conversación</button></div><div class="msgs" id="log"></div><form class="row" id="f"><input id="m" style="flex:1" placeholder="Escribe como si fueras el cliente…"/><button class="primary">Enviar</button></form><pre id="dbg" class="muted"></pre></div>`;
+    $("#new", view).onclick = () => { conv = null; $("#log", view).innerHTML = ""; };
+    $("#f", view).onsubmit = async (e) => {
+      e.preventDefault(); const text = $("#m", view).value.trim(); if (!text) return; $("#m", view).value = "";
+      $("#log", view).insertAdjacentHTML("beforeend", `<div class="customer">${esc(text)}</div>`);
+      const r = await api(`/v1/agents/${$("#ag", view).value}/chat`, { method: "POST", body: JSON.stringify({ message: text, conversation_id: conv || undefined, channel: "consola" }) });
+      conv = r.conversation_id;
+      $("#log", view).insertAdjacentHTML("beforeend", `<div>${esc(r.reply || "(sin respuesta: " + r.status + ")")}</div>`);
+      $("#dbg", view).textContent = JSON.stringify({ status: r.status, tools: r.tools_executed, approvals: r.approvals }, null, 2);
+    };
+  },
+};
+show(current);
+</script>
+</body>
+</html>

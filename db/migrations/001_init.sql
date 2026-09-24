@@ -136,6 +136,8 @@ CREATE TABLE approvals (
   status          text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
   decided_by      text,
   decided_at      timestamptz,
+  -- true cuando la decisión ya se entregó al motor (evita que dos decisiones simultáneas reanuden dos veces)
+  consumed        boolean NOT NULL DEFAULT false,
   created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (conversation_id, tool_use_id)
 );

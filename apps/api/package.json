@@ -1,0 +1,29 @@
+{
+  "name": "@agentes/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Plano de control: tenants, plantillas, despliegues/releases, conversaciones, aprobaciones, canales",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "@agentes/agent-spec": "workspace:*",
+    "@fastify/cors": "^11.0.0",
+    "@temporalio/client": "^1.24.0",
+    "fastify": "^5.2.0",
+    "pg": "^8.13.1",
+    "yaml": "^2.6.1",
+    "semver": "^7.6.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "@types/semver": "^7.5.8"
+  }
+}
