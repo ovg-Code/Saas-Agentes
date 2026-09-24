@@ -1,0 +1,8 @@
+{
+  "name": "@agentes/agenda-mock",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Agenda ficticia: servidor MCP de calendario + API de pagos OpenAPI, para demos y tests",
+  "scripts": { "start": "node server.mjs" }
+}

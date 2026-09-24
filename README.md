@@ -22,6 +22,10 @@ AGENTES_TOKEN=... CRM_LOPEZ_API_KEY=... pnpm agentes deploy examples/clientes/fe
    Widget     <script src="…/widget.js" data-agent="<id>" data-key="…" async></script>
 ```
 
+Plantillas incluidas: **atención al cliente** (FAQ, pedidos, tickets, reembolsos con aprobación) y
+**agendar citas** (huecos, reservas, cancelaciones, cobro de señal con aprobación). Clientes de ejemplo en
+[`examples/clientes/`](examples/clientes/).
+
 ## Cómo funciona
 
 Parametrización en **4 capas**: *plantilla* (la escribimos una vez, con capacidades abstractas como

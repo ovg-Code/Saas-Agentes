@@ -56,10 +56,30 @@ class GatewayLlm:
 # --------------------------------------------------------------------------- fake
 
 _ORDER = re.compile(r"\b(\d{3,})\b")
+_APPOINTMENT = re.compile(r"\b(C-\d+)\b", re.I)
+_HOUR = re.compile(r"\b(\d{1,2})(?::|h)(\d{2})\b")
+_HOUR_LOOSE = re.compile(r"\ba las (\d{1,2})\b")
+_DATE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+_NOW = re.compile(r"ahora es \w+ (\d{4}-\d{2}-\d{2})")
+_NAME = re.compile(r"\b(?:soy|me llamo)\s+([A-ZÁÉÍÓÚÑ][\wáéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wáéíóúñ]+)?)")
+
+
+def _target_date(text: str, context: str) -> str:
+    """Fecha explícita (YYYY-MM-DD) o, si no, 'mañana' respecto a la hora de plataforma del turno."""
+    if m := _DATE.search(text):
+        return m.group(1)
+    if m := _NOW.search(context):
+        from datetime import date, timedelta
+
+        return (date.fromisoformat(m.group(1)) + timedelta(days=1)).isoformat()
+    return "2026-01-01"
 
 
 class FakeLlm:
-    """Reglas simples por palabra clave -> tool. Suficiente para probar el cableado de extremo a extremo."""
+    """Reglas simples por palabra clave -> tool. Suficiente para probar el cableado de extremo a extremo.
+
+    Es un doble de pruebas: conoce los nombres de tools de las plantillas del repo. No sustituye a las evals
+    con el modelo real (`LLM_PROVIDER=gateway` + `agentes eval`)."""
 
     async def __call__(self, request: LlmRequest) -> LlmResponse:
         tools = {t["name"] for t in request.tools}
@@ -72,6 +92,7 @@ class FakeLlm:
             return self._text(self._summarize(results))
 
         text = texts[-1] if texts else ""
+        context = " ".join(texts[:-1])
         low = text.lower()
         order = _ORDER.search(text)
         n = sum(1 for m in request.messages if m["role"] == "assistant")
@@ -82,6 +103,23 @@ class FakeLlm:
 
         if re.search(r"persona|humano|agente real|hablar con alguien", low) and "humano__escalar" in tools:
             return call("humano__escalar", {"motivo": "El cliente pide hablar con una persona", "resumen": text[:200]})
+        # --- plantilla agendar-citas
+        appt = _APPOINTMENT.search(text)
+        if "cancel" in low and appt and "calendario__cancelar_cita" in tools:
+            return call("calendario__cancelar_cita", {"id_cita": appt.group(1).upper()})
+        if re.search(r"señal|senal|pagar", low) and appt and "pagos__cobrar_senal" in tools:
+            return call("pagos__cobrar_senal", {"body": {"id_cita": appt.group(1).upper(), "importe": 20}})
+        hour = _HOUR.search(text) or _HOUR_LOOSE.search(text)
+        if "reserv" in low and hour and "calendario__crear_cita" in tools:
+            hh = int(hour.group(1))
+            mm = hour.group(2) if hour.re is _HOUR else "00"
+            name = _NAME.search(text)
+            return call("calendario__crear_cita", {
+                "fecha": _target_date(text, context), "hora": f"{hh:02d}:{mm}", "servicio": "revisión",
+                "nombre_cliente": name.group(1) if name else "Cliente"})
+        if re.search(r"hueco|disponib|cita", low) and "calendario__disponibilidad" in tools:
+            return call("calendario__disponibilidad", {"fecha": _target_date(text, context)})
+        # --- plantilla atencion-cliente
         if "reembols" in low and order and "pedidos__reembolsar" in tools:
             return call("pedidos__reembolsar", {"numero": order.group(1), "body": {"motivo": text[:200]}})
         if re.search(r"ticket|incidencia|queja", low) and "tickets__crear" in tools:

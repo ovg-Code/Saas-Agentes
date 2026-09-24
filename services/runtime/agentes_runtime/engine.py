@@ -11,6 +11,8 @@ Una conversación es una máquina de estados: idle -> (awaiting_approval | hando
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Any, Literal, Protocol, Union
 
 from pydantic import BaseModel, Field
@@ -26,6 +28,9 @@ class TurnContext(BaseModel):
     tenant_id: str
     agent_id: str
     conversation_id: str
+    # Momento del turno (ISO 8601, UTC). Lo fija quien invoca: la API en modo directo,
+    # `workflow.now()` en Temporal (determinista). Sin esto el agente no sabe qué es "mañana".
+    now: str | None = None
 
 
 class UserMessage(BaseModel):
@@ -129,6 +134,23 @@ HANDOFF_DEFAULT_REPLY = "Te paso con una persona del equipo, que continuará est
 STEP_LIMIT_REPLY = "No he podido completar tu solicitud ahora mismo. ¿Quieres que te pase con una persona del equipo?"
 
 
+WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+
+def describe_now(now_iso: str, params: dict[str, Any]) -> str:
+    """'ahora es martes 2026-09-29 10:30 (Europe/Madrid)'. Usa el parámetro convencional `zona_horaria` si existe."""
+    now = datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+    tz_name = params.get("zona_horaria") if isinstance(params.get("zona_horaria"), str) else None
+    label = "UTC"
+    if tz_name:
+        try:
+            now = now.astimezone(ZoneInfo(tz_name))
+            label = tz_name
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+    return f"ahora es {WEEKDAYS[now.weekday()]} {now:%Y-%m-%d %H:%M} ({label})"
+
+
 def idempotency_key(conversation_id: str, tool_use_id: str) -> str:
     """Estable entre reintentos: el sistema destino puede deduplicar escrituras."""
     return hashlib.sha256(f"{conversation_id}:{tool_use_id}".encode()).hexdigest()[:32]
@@ -188,7 +210,7 @@ class Engine:
                 cancelled = ApprovalDecision(decisions={p.tool_use_id: False for p in state.pending}, decided_by="sistema",
                                              note="cancelada porque el cliente continuó la conversación")
                 await self._resolve_pending(state, cancelled, result)
-            _append(state, "user", [{"type": "text", "text": turn_input.text}])
+            _append(state, "user", [*self._context_blocks(), {"type": "text", "text": turn_input.text}])
             if state.status == "handoff":
                 # Lo atiende una persona: el agente no responde.
                 result.status = "handoff"
@@ -196,6 +218,12 @@ class Engine:
 
         await self._loop(state, result)
         return state, result
+
+    def _context_blocks(self) -> list[dict[str, Any]]:
+        """Contexto temporal como bloque aparte del mensaje (no en el system prompt: rompería el prompt caching)."""
+        if not self.context.now:
+            return []
+        return [{"type": "text", "text": f"[Contexto de plataforma: {describe_now(self.context.now, self.release.params)}]"}]
 
     async def _resolve_pending(self, state: ConversationState, decision: ApprovalDecision, result: TurnResult) -> None:
         results = list(state.partial_results)

@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: Pagos Clínica Sonrisas (mock)
+  version: 1.0.0
+servers:
+  - url: http://localhost:9091
+paths:
+  /pagos/senal:
+    post:
+      operationId: cobrarSenal
+      summary: Cobrar la señal de una cita al método de pago guardado del paciente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id_cita, importe]
+              properties:
+                id_cita: { type: string, description: Identificador de la cita (C-n) }
+                importe: { type: number, description: Importe en euros }
+      responses: { "200": { description: Cobro realizado } }

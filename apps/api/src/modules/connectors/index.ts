@@ -2,6 +2,9 @@ import { type ConnectorCatalog, type DeploymentConnector, importOpenApi, OpenApi
 import type pg from "pg";
 import { parse as parseYaml } from "yaml";
 import { badRequest } from "../../shared/errors.js";
+import { authHeaders, listMcpTools, McpDiscoveryError } from "./mcp-client.js";
+
+export { authHeaders, listMcpTools, type McpTool } from "./mcp-client.js";
 
 /**
  * Capa 2: conectores. Un conector OpenAPI se "importa" (spec -> catálogo de operaciones) y se guarda
@@ -24,9 +27,22 @@ export async function upsertConnector(
   tenantId: string,
   connector: DeploymentConnector,
   spec: unknown | undefined,
+  secret?: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<ConnectorCatalog> {
-  if (spec !== undefined) {
-    if (connector.type !== "openapi") throw badRequest(`el conector ${connector.id} no es openapi`);
+  let catalog: ConnectorCatalog | undefined;
+
+  if (connector.type === "mcp") {
+    // MCP: se descubren las tools (tools/list) en cada despliegue, así el catálogo refleja el servidor actual.
+    if (!connector.url) throw badRequest(`el conector ${connector.id} (mcp) necesita 'url'`);
+    try {
+      const tools = await listMcpTools(connector.url, authHeaders(connector.auth, secret), fetchImpl);
+      catalog = { id: connector.id, type: "mcp", url: connector.url, operations: [], mcp_tools: tools };
+    } catch (e) {
+      const reason = e instanceof McpDiscoveryError ? e.message : (e as Error).message;
+      throw badRequest(`conector ${connector.id}: no se pudieron listar las tools MCP en ${connector.url} (${reason})`);
+    }
+  } else if (spec !== undefined) {
     let imported;
     try {
       imported = importOpenApi(parseSpec(spec));
@@ -34,25 +50,19 @@ export async function upsertConnector(
       if (e instanceof OpenApiError) throw badRequest(`conector ${connector.id}: ${e.message}`);
       throw e;
     }
-    const catalog: ConnectorCatalog = {
-      id: connector.id,
-      type: "openapi",
-      base_url: imported.base_url,
-      operations: imported.operations,
-    };
+    catalog = { id: connector.id, type: "openapi", base_url: imported.base_url, operations: imported.operations };
+  }
+
+  if (catalog) {
     await c.query(
       `INSERT INTO connectors (tenant_id, slug, type, source, catalog) VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (tenant_id, slug) DO UPDATE SET type = EXCLUDED.type, source = EXCLUDED.source,
          catalog = EXCLUDED.catalog, updated_at = now()`,
-      [tenantId, connector.id, connector.type, connector.spec ?? null, JSON.stringify(catalog)],
+      [tenantId, connector.id, connector.type, connector.spec ?? connector.url ?? null, JSON.stringify(catalog)],
     );
     return catalog;
   }
   const { rows } = await c.query("SELECT catalog FROM connectors WHERE slug = $1", [connector.id]);
   if (rows[0]) return rows[0].catalog as ConnectorCatalog;
-  if (connector.type === "mcp") {
-    // Catálogo MCP vacío: se rellenará con tools/list (hoy lo aporta el despliegue en connector_catalogs).
-    return { id: connector.id, type: "mcp", url: connector.url, operations: [], mcp_tools: [] };
-  }
   throw badRequest(`el conector ${connector.id} no tiene spec y no se había importado antes`);
 }

@@ -118,7 +118,8 @@ class ConversationWorkflow:
                 start_to_close_timeout=timedelta(seconds=30), retry_policy=RetryPolicy(maximum_attempts=10))
 
     async def _run(self, turn_input: UserMessage | ApprovalDecision | HumanReply) -> TurnResult:
-        engine = Engine(self.release, self.context, _TemporalEffects())
+        context = self.context.model_copy(update={"now": workflow.now().isoformat()})
+        engine = Engine(self.release, context, _TemporalEffects())
         self.state, result = await engine.run(self.state, turn_input)
         return result
 

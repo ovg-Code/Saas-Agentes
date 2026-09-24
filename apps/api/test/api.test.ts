@@ -2,6 +2,7 @@
  * Tests de integración del plano de control contra Postgres real (RLS incluida) y un runtime simulado.
  * Requiere TEST_DATABASE_ADMIN_URL (superusuario/propietario). Crea una BD temporal por ejecución.
  */
+import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -234,6 +235,49 @@ describeDb("plano de control (integración)", () => {
     const call = (await rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "preguntar", arguments: { message: "hola mcp" } } })).json();
     expect(call.result.content[0].text).toBe("eco: hola mcp");
     expect(call.result.structuredContent.conversation_id).toBeTruthy();
+  });
+
+  it("despliega un cliente cuya agenda es un servidor MCP (descubre sus tools)", async () => {
+    // Servidor MCP "antiguo" que exige initialize + sesión: el descubrimiento debe adaptarse.
+    const port = 19000 + Math.floor(Math.random() * 900);
+    const mock: ChildProcess = spawn("node", [join(ROOT, "examples/agenda-mock/server.mjs")], {
+      env: { ...process.env, PORT: String(port), AGENDA_TOKEN: "tok", REQUIRE_SESSION: "1" },
+      stdio: "ignore",
+    });
+    try {
+      for (let i = 0; i < 50; i++) {
+        if (await fetch(`http://localhost:${port}/_debug`).then(() => true, () => false)) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const d = parseYaml(readFileSync(join(ROOT, "examples/clientes/clinica-sonrisas.yaml"), "utf8"));
+      d.connectors[0].url = `http://localhost:${port}/mcp`;
+      const body = {
+        deployment: d,
+        connector_specs: { pagos: readFileSync(join(ROOT, "examples/agenda-mock/openapi.yaml"), "utf8") },
+        secrets: { "agenda-token": "tok" },
+        knowledge: [],
+      };
+      const r = await inject("POST", "/v1/deploy", PLATFORM, body);
+      expect(r.statusCode, r.body).toBe(201);
+      const tools = r.json().tools.map((t: { name: string; binding: string }) => `${t.name} ${t.binding}`);
+      expect(tools).toContain("calendario__crear_cita agenda: crear_cita");
+      expect(tools).toContain("pagos__cobrar_senal pagos: POST /pagos/senal");
+      const { rows } = await db.admin.query("SELECT catalog FROM connectors WHERE slug = 'agenda'");
+      expect(rows[0].catalog.mcp_tools.map((t: { name: string }) => t.name)).toEqual([
+        "consultar_disponibilidad", "crear_cita", "buscar_citas", "cancelar_cita",
+      ]);
+
+      // Redesplegar sin secreto reutiliza el de la bóveda para volver a descubrir.
+      const again = await inject("POST", "/v1/deploy", PLATFORM, { ...body, secrets: {} });
+      expect(again.statusCode, again.body).toBe(200);
+
+      // Credencial incorrecta -> error claro, nada publicado.
+      const bad = await inject("POST", "/v1/deploy", PLATFORM, { ...body, secrets: { "agenda-token": "mal" } });
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json().error).toMatch(/no se pudieron listar las tools MCP.*credenciales/);
+    } finally {
+      mock.kill();
+    }
   });
 
   it("sirve el widget, la consola y el catálogo con el formulario de parámetros", async () => {

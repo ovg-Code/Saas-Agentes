@@ -32,11 +32,13 @@ def _parse(response: httpx.Response) -> dict[str, Any]:
 
 
 class McpClient:
-    def __init__(self, url: str, headers: dict[str, str], timeout: float = 20.0):
+    def __init__(self, url: str, headers: dict[str, str], timeout: float = 20.0,
+                 transport: httpx.AsyncBaseTransport | None = None):
         self._url = url
         self._headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json",
                          "MCP-Protocol-Version": PROTOCOL_VERSION, **headers}
         self._timeout = timeout
+        self._transport = transport
 
     async def _rpc(self, client: httpx.AsyncClient, method: str, params: dict[str, Any],
                    headers: dict[str, str]) -> httpx.Response:
@@ -44,7 +46,7 @@ class McpClient:
         return await client.post(self._url, json=body, headers={**headers, "Mcp-Method": method})
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
             headers = dict(self._headers)
             r = await self._rpc(client, "tools/call", {"name": name, "arguments": arguments}, {**headers, "Mcp-Name": name})
             needs_session = r.status_code in (400, 404) and any(w in r.text.lower() for w in ("session", "initializ"))

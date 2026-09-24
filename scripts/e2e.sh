@@ -21,12 +21,15 @@ cleanup() {
   pkill -f "agentes_runtime[.]temporal[.]worker" 2>/dev/null || true
   pkill -f "src/main[.]ts" 2>/dev/null || true
   pkill -f "crm-mock/server[.]mjs" 2>/dev/null || true
-  rm -f "$ROOT/examples/clientes/.e2e.yaml"
+  pkill -f "agenda-mock/server[.]mjs" 2>/dev/null || true
+  rm -f "$ROOT/examples/clientes/.e2e.yaml" "$ROOT/examples/clientes/.e2e-citas.yaml"
   [ "${E2E_OK:-0}" = 1 ] || echo "logs en $LOGS"
 }
 trap cleanup EXIT
 
 CRM_API_KEY=crm-demo-key PORT=9090 node examples/crm-mock/server.mjs >"$LOGS/crm.log" 2>&1 &
+AGENDA_TOKEN=agenda-demo-token PORT=9091 node examples/agenda-mock/server.mjs >"$LOGS/agenda.log" 2>&1 &
+json() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(eval(process.argv[1]))})' "$1"; }
 (cd services/runtime && LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake PORT=18090 CONTROL_PLANE_URL=http://localhost:18080 \
   uv run python -m agentes_runtime.api >"$LOGS/runtime.log" 2>&1) &
 if [ "${RUNTIME_MODE:-direct}" = temporal ]; then
@@ -82,6 +85,36 @@ echo
 
 echo "== 6. Evals golden de la plantilla =="
 AGENTES_TOKEN=$AGENT_KEY node apps/cli/bin/agentes.js eval --agent "$AGENT_ID" --template templates/atencion-cliente
+
+echo "== 7. Segundo cliente con OTRA plantilla (agendar-citas): agenda por MCP + pagos por OpenAPI =="
+sed "s/slug: clinica-sonrisas/slug: $SLUG-clinica/" examples/clientes/clinica-sonrisas.yaml > examples/clientes/.e2e-citas.yaml
+OUT2=$(AGENTES_TOKEN=$PLATFORM_ADMIN_TOKEN AGENDA_TOKEN=agenda-demo-token node apps/cli/bin/agentes.js deploy examples/clientes/.e2e-citas.yaml)
+echo "$OUT2"
+CITAS_KEY=$(echo "$OUT2" | sed -n 's/^ *agent *\(ak_[^ ]*\).*/\1/p')
+CITAS_ADMIN=$(echo "$OUT2" | sed -n 's/^ *admin *\(ak_[^ ]*\).*/\1/p')
+CITAS_ID=$(echo "$OUT2" | sed -n 's#.*/v1/agents/\([0-9a-f-]*\)/chat.*#\1#p' | head -1)
+echo "$OUT2" | grep -q "calendario__crear_cita .*agenda: crear_cita"
+
+chat_citas() {
+  curl -sf -X POST "$AGENTES_API_URL/v1/agents/$CITAS_ID/chat" -H "authorization: Bearer $CITAS_KEY" -H 'content-type: application/json' \
+    -d "$(node -e 'console.log(JSON.stringify({message: process.argv[1], ...(process.argv[2] ? {conversation_id: process.argv[2]} : {})}))' "$1" "${2:-}")"
+}
+R=$(chat_citas "¿Qué huecos tenéis mañana?"); echo "$R" | json 'j.reply'
+test "$(echo "$R" | json 'j.tools_executed.join()')" = "calendario__disponibilidad"
+
+R=$(chat_citas "Quiero reservar mañana a las 16:30, soy Marta Díaz"); echo "$R" | json 'j.reply'
+CONV=$(echo "$R" | json 'j.conversation_id')
+CITA=$(curl -sf http://localhost:9091/_debug | json 'j.citas.find(c=>c.hora==="16:30"&&c.nombre_cliente==="Marta Díaz").id')
+echo "cita creada en la agenda del cliente: $CITA"
+
+R=$(chat_citas "Cobradme la señal de la cita $CITA" "$CONV")
+test "$(echo "$R" | json 'j.status')" = "awaiting_approval"
+test "$(curl -sf http://localhost:9091/_debug | json 'j.cobros.length')" = "0"
+curl -sS --fail-with-body -X POST "$AGENTES_API_URL/v1/approvals/$(echo "$R" | json 'j.approvals[0].id')" \
+  -H "authorization: Bearer $CITAS_ADMIN" -H 'content-type: application/json' -d '{"approve":true,"by":"recepcion"}' | json 'j.reply'
+test "$(curl -sf http://localhost:9091/_debug | json 'j.cobros.length')" = "1"
+
+AGENTES_TOKEN=$CITAS_KEY node apps/cli/bin/agentes.js eval --agent "$CITAS_ID" --template templates/agendar-citas
 
 E2E_OK=1
 echo -e "\n✔ E2E completado"

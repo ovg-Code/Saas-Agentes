@@ -1,0 +1,48 @@
+# Capa 3 — cliente con la plantilla "agendar-citas".
+# Su agenda se integra por MCP (como haría con Google Calendar/Calendly) y los cobros por su API REST (OpenAPI):
+# dos tipos de conector distintos en el mismo agente, sin escribir código.
+# Uso:  AGENDA_TOKEN=agenda-demo-token pnpm agentes deploy examples/clientes/clinica-sonrisas.yaml
+tenant:
+  slug: clinica-sonrisas
+  name: Clínica Dental Sonrisas
+agent:
+  slug: citas
+  name: Asistente de citas de Clínica Sonrisas
+template: agendar-citas@^1.0
+
+params:
+  empresa: Clínica Dental Sonrisas
+  servicios: [revisión, limpieza, blanqueamiento, urgencia]
+  zona_horaria: Europe/Madrid
+  antelacion_min_horas: 4
+  politica_cancelacion: "Cancela o cambia sin coste hasta 24 horas antes; después se pierde la señal."
+  senal: opcional
+  tono: cercano
+
+connectors:
+  - id: agenda
+    type: mcp
+    url: http://localhost:9091/mcp
+    auth: { type: bearer, credential: agenda-token }
+  - id: pagos
+    type: openapi
+    spec: ../agenda-mock/openapi.yaml
+    base_url: http://localhost:9091
+    auth: { type: bearer, credential: agenda-token }
+
+bindings:
+  calendario.disponibilidad: { connector: agenda, operation: consultar_disponibilidad }
+  calendario.crear_cita: { connector: agenda, operation: crear_cita }
+  calendario.buscar_citas: { connector: agenda, operation: buscar_citas }
+  calendario.cancelar_cita: { connector: agenda, operation: cancelar_cita }
+  pagos.cobrar_senal: { connector: pagos, operation: cobrarSenal }
+
+credentials:
+  agenda-token: { from_env: AGENDA_TOKEN }
+
+knowledge:
+  - source: ./clinica-sonrisas-info.md
+    title: Información de la clínica
+
+channels: [widget, api, mcp]
+autonomy: L3

@@ -64,6 +64,8 @@ importers:
         specifier: ^2.6.1
         version: 2.9.1
 
+  examples/agenda-mock: {}
+
   examples/crm-mock: {}
 
   packages/agent-spec:

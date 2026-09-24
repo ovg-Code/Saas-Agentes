@@ -6,7 +6,9 @@
 3. **Conectar sus sistemas** (solo si la plantilla usa capacidades opcionales):
    - ¿Tiene API con OpenAPI/Swagger? Añade un conector `type: openapi` con `spec:` (ruta o URL) y enlaza cada
      capacidad a una operación (`operationId` o `"GET /ruta"`).
-   - ¿Tiene servidor MCP? Conector `type: mcp` con `url:`.
+   - ¿Tiene servidor MCP (Google Calendar, Calendly, su propio software…)? Conector `type: mcp` con `url:`.
+     Al desplegar, la plataforma llama a `tools/list` con su credencial y enlaza cada capacidad a una tool por
+     su nombre. Un mismo agente puede mezclar conectores MCP y OpenAPI.
    - Credenciales: `credentials: { nombre: { from_env: VARIABLE } }`. La CLI lee la variable y la sube cifrada;
      nunca se escribe el secreto en el YAML.
 4. **Conocimiento** — `knowledge:` con rutas a sus documentos (FAQ, políticas, catálogo) o URLs.
@@ -23,4 +25,6 @@
 Cambios posteriores: edita el YAML y vuelve a desplegar (idempotente; solo crea release si algo cambió).
 Rollback: `POST /v1/agents/<id>/activate {"release_id": "rel_..."}`.
 
-Ejemplo completo: [`examples/clientes/ferreteria-lopez.yaml`](../examples/clientes/ferreteria-lopez.yaml).
+Ejemplos completos:
+- [`ferreteria-lopez.yaml`](../examples/clientes/ferreteria-lopez.yaml): atención al cliente + CRM propio (OpenAPI).
+- [`clinica-sonrisas.yaml`](../examples/clientes/clinica-sonrisas.yaml): citas con agenda por MCP + cobros por OpenAPI.

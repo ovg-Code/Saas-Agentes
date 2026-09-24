@@ -206,7 +206,7 @@ export class ConversationService {
   private async turn(conv: ConversationRow, input: TurnInput, actor: string): Promise<ChatResponse> {
     const { state, result } = await this.runtime.turn({
       release: conv.release,
-      context: { tenant_id: conv.tenant_id, agent_id: conv.agent_id, conversation_id: conv.id },
+      context: { tenant_id: conv.tenant_id, agent_id: conv.agent_id, conversation_id: conv.id, now: new Date().toISOString() },
       state: this.runtime.mode === "direct" ? conv.state : null,
       input,
     });

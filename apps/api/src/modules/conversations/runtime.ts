@@ -29,6 +29,8 @@ export interface TurnContext {
   tenant_id: string;
   agent_id: string;
   conversation_id: string;
+  /** Momento del turno (ISO UTC). En Temporal lo sustituye `workflow.now()` en cada turno. */
+  now?: string;
 }
 
 export interface EngineState {

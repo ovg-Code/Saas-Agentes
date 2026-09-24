@@ -1,0 +1,310 @@
+{
+  "id": "rel_076252f1df08485d",
+  "schema_version": 1,
+  "tenant": {
+    "slug": "clinica-sonrisas",
+    "name": "Clínica Dental Sonrisas"
+  },
+  "agent": {
+    "slug": "citas",
+    "name": "Asistente de citas de Clínica Sonrisas"
+  },
+  "template": {
+    "id": "agendar-citas",
+    "version": "1.0.0"
+  },
+  "autonomy": "L3",
+  "model": {
+    "alias": "agente-default",
+    "max_tokens": 2048
+  },
+  "instructions": "Eres el asistente de citas de Clínica Dental Sonrisas. Hablas con un tono cercano y ayudas a reservar, consultar,\ncambiar o cancelar citas. Servicios disponibles: revisión, limpieza, blanqueamiento, urgencia.\n\nReglas:\n- Trabajas en la zona horaria Europe/Madrid. Interpreta \"hoy\", \"mañana\" o \"el martes\" usando la fecha que te da\n  la plataforma en cada mensaje y confirma siempre la fecha completa (día de la semana y fecha) antes de reservar.\n- Nunca inventes huecos: consulta SIEMPRE la disponibilidad antes de proponer horas y ofrece 2-3 opciones.\n- No reserves con menos de 4 horas de antelación.\n- Antes de crear la cita, confirma servicio, fecha, hora y nombre del cliente (y teléfono si lo tienes).\n- Política de cancelación: Cancela o cambia sin coste hasta 24 horas antes; después se pierde la señal.\n- Señal para reservar: opcional. Si es obligatoria u opcional y el cliente acepta, solicita el cobro con\n  `pagos__cobrar_senal`: requiere aprobación de una persona del equipo, díselo al cliente.\n- Si el cliente pide algo que no es una cita (presupuestos, urgencias, reclamaciones), usa la base de\n  conocimiento o escala a una persona.\n",
+  "procedures": [
+    {
+      "id": "reservar",
+      "title": "Reservar una cita",
+      "when": "El cliente quiere pedir cita o pregunta por huecos libres.",
+      "content": "1. Averigua el servicio y el día que prefiere el cliente (si dice \"mañana\" o \"el viernes\", conviértelo a fecha con el contexto de plataforma).\n2. Llama a `calendario__disponibilidad` para ese día. Propón 2-3 huecos concretos; si no hay, ofrece el día siguiente.\n3. Cuando el cliente elija, confirma en una frase: servicio, día de la semana, fecha, hora y nombre.\n4. Llama a `calendario__crear_cita`. Si la agenda responde que el hueco está ocupado, discúlpate y vuelve al paso 2.\n5. Comunica el identificador de la cita y la política de cancelación.\n6. Si la señal es obligatoria u opcional y el cliente la acepta, llama a `pagos__cobrar_senal` con el identificador de la cita; explica que una persona del equipo lo confirmará."
+    },
+    {
+      "id": "cancelar_reprogramar",
+      "title": "Cancelar o cambiar una cita",
+      "when": "El cliente quiere anular o mover una cita existente.",
+      "content": "1. Identifica la cita: pide el identificador (C-…) o busca con `calendario__buscar_citas` por teléfono o nombre.\n2. Confirma con el cliente qué cita es (servicio, fecha y hora) antes de tocar nada.\n3. Para cancelar, llama a `calendario__cancelar_cita` y recuerda la política de cancelación.\n4. Para cambiarla: primero consulta la disponibilidad y reserva la nueva cita; solo cuando esté creada, cancela la anterior."
+    },
+    {
+      "id": "escalado",
+      "title": "Escalado a una persona",
+      "when": "Urgencias, quejas, o el cliente pide hablar con alguien.",
+      "content": "1. Si el cliente describe una urgencia, un problema de salud o una queja, no des consejo: escala con `humano__escalar`.\n2. Incluye en el resumen el motivo y los datos de la cita si los hay.\n3. Dile al cliente que una persona del equipo continuará la conversación."
+    }
+  ],
+  "tools": [
+    {
+      "name": "calendario__buscar_citas",
+      "capability": "calendario.buscar_citas",
+      "tier": "read",
+      "approval": "auto",
+      "description": "Buscar las citas existentes de un cliente.\n(Sistema: agenda — Busca citas.)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "telefono": {
+            "type": "string"
+          },
+          "nombre": {
+            "type": "string"
+          }
+        }
+      },
+      "binding": {
+        "kind": "mcp",
+        "connector": "agenda",
+        "tool": "buscar_citas"
+      }
+    },
+    {
+      "name": "calendario__cancelar_cita",
+      "capability": "calendario.cancelar_cita",
+      "tier": "write",
+      "approval": "auto",
+      "description": "Cancelar una cita existente.\n(Sistema: agenda — Cancela una cita.)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id_cita": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id_cita"
+        ]
+      },
+      "binding": {
+        "kind": "mcp",
+        "connector": "agenda",
+        "tool": "cancelar_cita"
+      }
+    },
+    {
+      "name": "calendario__crear_cita",
+      "capability": "calendario.crear_cita",
+      "tier": "write",
+      "approval": "auto",
+      "description": "Reservar una cita en un hueco libre de la agenda.\n(Sistema: agenda — Reserva una cita.)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "fecha": {
+            "type": "string"
+          },
+          "hora": {
+            "type": "string"
+          },
+          "servicio": {
+            "type": "string"
+          },
+          "nombre_cliente": {
+            "type": "string"
+          },
+          "telefono": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fecha",
+          "hora",
+          "servicio",
+          "nombre_cliente"
+        ]
+      },
+      "binding": {
+        "kind": "mcp",
+        "connector": "agenda",
+        "tool": "crear_cita"
+      }
+    },
+    {
+      "name": "calendario__disponibilidad",
+      "capability": "calendario.disponibilidad",
+      "tier": "read",
+      "approval": "auto",
+      "description": "Consultar los huecos libres de un día en la agenda del negocio.\n(Sistema: agenda — Devuelve los huecos libres de un día.)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "fecha": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fecha"
+        ]
+      },
+      "binding": {
+        "kind": "mcp",
+        "connector": "agenda",
+        "tool": "consultar_disponibilidad"
+      }
+    },
+    {
+      "name": "conocimiento__buscar",
+      "capability": "conocimiento.buscar",
+      "tier": "read",
+      "approval": "auto",
+      "description": "Buscar en la información del negocio (servicios, precios, ubicación, preparación).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "consulta": {
+            "type": "string",
+            "description": "Qué buscar, en lenguaje natural"
+          },
+          "max_resultados": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 4
+          }
+        },
+        "required": [
+          "consulta"
+        ],
+        "additionalProperties": false
+      },
+      "binding": {
+        "kind": "builtin",
+        "name": "conocimiento.buscar"
+      }
+    },
+    {
+      "name": "humano__escalar",
+      "capability": "humano.escalar",
+      "tier": "write",
+      "approval": "auto",
+      "description": "Transferir la conversación a una persona del equipo.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "motivo": {
+            "type": "string",
+            "description": "Por qué se escala"
+          },
+          "resumen": {
+            "type": "string",
+            "description": "Resumen breve de la conversación para el humano"
+          },
+          "prioridad": {
+            "type": "string",
+            "enum": [
+              "baja",
+              "normal",
+              "alta"
+            ]
+          }
+        },
+        "required": [
+          "motivo",
+          "resumen"
+        ],
+        "additionalProperties": false
+      },
+      "binding": {
+        "kind": "builtin",
+        "name": "humano.escalar"
+      }
+    },
+    {
+      "name": "pagos__cobrar_senal",
+      "capability": "pagos.cobrar_senal",
+      "tier": "financial",
+      "approval": "ask",
+      "description": "Cobrar la señal de una cita al cliente.\n(Sistema: pagos — Cobrar la señal de una cita al método de pago guardado del paciente)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "object",
+            "required": [
+              "id_cita",
+              "importe"
+            ],
+            "properties": {
+              "id_cita": {
+                "type": "string",
+                "description": "Identificador de la cita (C-n)"
+              },
+              "importe": {
+                "type": "number",
+                "description": "Importe en euros"
+              }
+            },
+            "description": "Cuerpo JSON de la petición"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "binding": {
+        "kind": "http",
+        "connector": "pagos",
+        "method": "POST",
+        "path": "/pagos/senal",
+        "params": [],
+        "has_body": true
+      }
+    }
+  ],
+  "connectors": {
+    "agenda": {
+      "type": "mcp",
+      "url": "http://localhost:9091/mcp",
+      "auth": {
+        "type": "bearer",
+        "credential_ref": "vault://clinica-sonrisas/agenda-token"
+      }
+    },
+    "pagos": {
+      "type": "openapi",
+      "base_url": "http://localhost:9091",
+      "auth": {
+        "type": "bearer",
+        "credential_ref": "vault://clinica-sonrisas/agenda-token"
+      }
+    }
+  },
+  "guardrails": {
+    "max_steps_per_turn": 6,
+    "blocked_topics": [
+      "diagnóstico médico",
+      "asesoramiento legal"
+    ],
+    "untrusted_input": true
+  },
+  "channels": [
+    "widget",
+    "api",
+    "mcp"
+  ],
+  "params": {
+    "empresa": "Clínica Dental Sonrisas",
+    "servicios": [
+      "revisión",
+      "limpieza",
+      "blanqueamiento",
+      "urgencia"
+    ],
+    "zona_horaria": "Europe/Madrid",
+    "antelacion_min_horas": 4,
+    "politica_cancelacion": "Cancela o cambia sin coste hasta 24 horas antes; después se pierde la señal.",
+    "senal": "opcional",
+    "tono": "cercano",
+    "duracion_por_defecto": 30
+  },
+  "knowledge_sources": [
+    "./clinica-sonrisas-info.md"
+  ],
+  "webhooks": []
+}

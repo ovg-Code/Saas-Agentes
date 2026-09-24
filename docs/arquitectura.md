@@ -162,6 +162,10 @@ el **mismo código** corre en dos modos:
 
 Máquina de estados por conversación: `idle → awaiting_approval | handoff → idle`.
 
+- **Hora del turno**: cada turno lleva `now` (la API en modo directo, `workflow.now()` en Temporal, que es
+  determinista). El motor la añade al mensaje del cliente en la zona horaria del negocio (parámetro convencional
+  `zona_horaria`), fuera del system prompt para no invalidar el prompt caching.
+
 - **Aprobaciones**: la tool queda pendiente, se persiste, un humano decide (consola/API) y el motor reanuda
   exactamente donde estaba. En Temporal, una aprobación sin revisar **expira sola a las 24 h** (timer durable) y se
   notifica al plano de control.
@@ -188,7 +192,7 @@ cableado completo (tools, políticas, estados, evals) sin coste.
 |---|---|---|
 | builtin | `conocimiento.buscar`, `humano.escalar` | la plataforma |
 | HTTP | cualquier operación de un OpenAPI importado | path/query/header/body reconstruidos desde el binding |
-| MCP | tools de un servidor MCP remoto | cliente Streamable HTTP, sin estado (spec 2026-07-28) con fallback a sesión |
+| MCP | tools de un servidor MCP remoto | descubiertas con `tools/list` al desplegar (plano de control); ejecutadas con un cliente Streamable HTTP sin estado (spec 2026-07-28) con fallback a sesión (runtime) |
 
 Los secretos se canjean **solo en el momento de ejecutar** (`/internal/credentials/resolve`) y se usan para la
 cabecera HTTP: nunca entran en el contexto del modelo, ni en el release, ni en la auditoría.
@@ -281,8 +285,8 @@ versión de regla/modelo.
 
 | Fase | Contenido |
 |---|---|
-| **1 (este repo)** | Plantilla atención al cliente · 4 capas · OpenAPI→tools · MCP entrada/salida · widget · aprobaciones · handoff · RLS · bóveda · Temporal · CLI · evals · Helm |
-| 2 | WhatsApp Cloud API y email como canales · plantilla **agendar citas** (Google Calendar/Outlook vía MCP + OAuth por tenant, p.ej. Nango) · streaming SSE en la API |
+| **1 ✔** | Plantilla atención al cliente · 4 capas · OpenAPI→tools · MCP entrada · widget · aprobaciones · handoff · RLS · bóveda · Temporal · CLI · evals · Helm |
+| **2 (en curso)** | ✔ Plantilla **agendar citas** (sin cambios en el motor) · ✔ conectores **MCP de salida** con descubrimiento `tools/list` al desplegar · ✔ hora del turno en la zona del cliente · pendiente: OAuth por tenant (Google/Outlook vía Nango), WhatsApp y email, streaming SSE |
 | 3 | Plantillas **inventario** y **CRM operado por agentes** · triggers por evento/cron (el agente actúa sin que nadie escriba) · virtual keys de LiteLLM por tenant automáticas · spans OTel GenAI |
 | 4 | Plantilla **conciliaciones**: motor determinista + LLM para excepciones + aprobaciones por lotes |
 | 5 | **Agentes autónomos** (L4-L5) con objetivos, presupuestos y memoria · multi-agente (un agente delega en otro vía A2A/MCP) · voz (LiveKit) · marketplace de plantillas · sandbox de código (E2B/Firecracker) para tools generadas |

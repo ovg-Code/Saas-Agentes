@@ -119,7 +119,7 @@ class ToolExecutor:
 
     async def _mcp(self, b: McpBinding, connector: ReleaseConnector, inv: ToolInvocation) -> ToolOutcome:
         headers = await self._auth_headers(connector, inv.context.tenant_id)
-        client = McpClient(connector.url or "", headers, timeout=self.http_timeout_s)
+        client = McpClient(connector.url or "", headers, timeout=self.http_timeout_s, transport=self._transport)
         result = await client.call_tool(b.tool, inv.input or {})
         texts = [c.get("text", "") for c in result.get("content", []) if c.get("type") == "text"]
         if not texts and "structuredContent" in result:

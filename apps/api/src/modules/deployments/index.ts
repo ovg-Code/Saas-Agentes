@@ -59,6 +59,7 @@ export class DeploymentService {
     private readonly vault: Vault,
     private readonly runtime: RuntimeGateway,
     private readonly publicBaseUrl: string,
+    private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
   async deploy(principal: Principal, req: DeployRequest): Promise<DeployResponse> {
@@ -104,7 +105,14 @@ export class DeploymentService {
         // Conectores (capa 2)
         const catalogs: Record<string, ConnectorCatalog> = {};
         for (const conn of deployment.connectors ?? []) {
-          catalogs[conn.id] = await upsertConnector(c, tenant.id, conn, req.connector_specs?.[conn.id]);
+          // Secreto para descubrir el catálogo (MCP tools/list): el recién recibido o el de la bóveda.
+          let secret: string | undefined;
+          const credName = conn.auth?.credential;
+          if (credName && conn.type === "mcp") {
+            const vaultName = deployment.credentials?.[credName]?.vault ?? credName;
+            secret = req.secrets?.[credName] ?? (stored.has(vaultName) ? await this.vault.get(c, tenant.id, vaultName) : undefined);
+          }
+          catalogs[conn.id] = await upsertConnector(c, tenant.id, conn, req.connector_specs?.[conn.id], secret, this.fetchImpl);
         }
 
         // Capa 4

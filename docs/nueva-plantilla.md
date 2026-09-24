@@ -4,14 +4,18 @@ Una plantilla es un directorio en `templates/<id>/` con tres cosas: `template.ya
 (`procedures/*.md`) y sus evals (`evals/golden.yaml`). **No se escribe código**: el runtime ya sabe ejecutar
 cualquier plantilla válida.
 
+Hay dos plantillas reales como referencia: [`atencion-cliente`](../templates/atencion-cliente/) y
+[`agendar-citas`](../templates/agendar-citas/). La segunda se añadió **sin cambiar el motor**: solo YAML y Markdown.
+
 ## 1. Piensa en capacidades, no en sistemas
 
-Pregunta: *¿qué necesita HACER el agente?*, no *¿con qué software?*. Ejemplo para **agendar citas**:
+Pregunta: *¿qué necesita HACER el agente?*, no *¿con qué software?*. Así se diseñó **agendar citas**:
 
 | Capacidad | Tier | Por qué |
 |---|---|---|
 | `calendario.disponibilidad` | read | consultar huecos |
 | `calendario.crear_cita` | write | reservar (se puede cancelar) |
+| `calendario.buscar_citas` | read | encontrar la cita de un cliente |
 | `calendario.cancelar_cita` | write | |
 | `pagos.cobrar_senal` | financial, `approval: always`, `locked: true` | mueve dinero |
 | `conocimiento.buscar`, `humano.escalar` | builtin | los aporta la plataforma |
@@ -19,6 +23,8 @@ Pregunta: *¿qué necesita HACER el agente?*, no *¿con qué software?*. Ejemplo
 Cada cliente enlazará `calendario.*` con SU sistema (Google Calendar vía MCP, Calendly, su ERP vía OpenAPI…).
 
 ## 2. `template.yaml`
+
+Versión resumida (la completa está en `templates/agendar-citas/template.yaml`):
 
 ```yaml
 id: agendar-citas
@@ -46,6 +52,11 @@ autonomy: { default: L3, max: L4 }
 channels: [widget, api, mcp, whatsapp]
 evals: evals/golden.yaml
 ```
+
+Convención: si la plantilla trabaja con fechas, declara un parámetro `zona_horaria` (IANA). La plataforma añade
+a cada mensaje del cliente la hora actual en esa zona (`[Contexto de plataforma: ahora es martes 2026-09-29 10:30
+(Europe/Madrid)]`), así el agente entiende "mañana" o "el viernes". Va en el mensaje y no en el system prompt para
+no romper el prompt caching.
 
 Reglas: el esquema completo está en `packages/agent-spec/schema/template.schema.json`. Las variables `{{x}}` deben
 existir en `parameters` (si no, el despliegue falla con un error claro).

@@ -1,0 +1,127 @@
+# Plantilla "Agendar citas" — Capa 1.
+# Sirve para clínicas, peluquerías, talleres, asesorías... Cada cliente enlaza `calendario.*` con SU agenda
+# (Google Calendar/Outlook/Calendly vía MCP, o su software de gestión vía OpenAPI).
+id: agendar-citas
+version: 1.0.0
+name: Asistente de citas
+category: citas
+description: >
+  Consulta huecos libres, reserva, busca y cancela citas en la agenda del negocio, responde dudas con su
+  base de conocimiento y, si el negocio lo pide, cobra una señal (siempre con aprobación humana).
+
+parameters:
+  type: object
+  required: [empresa, servicios]
+  properties:
+    empresa:
+      type: string
+      title: Nombre del negocio
+    servicios:
+      type: array
+      title: Servicios que se pueden reservar
+      items: { type: string }
+    zona_horaria:
+      type: string
+      title: Zona horaria (IANA)
+      default: Europe/Madrid
+    duracion_por_defecto:
+      type: integer
+      title: Duración por defecto de una cita (minutos)
+      default: 30
+    antelacion_min_horas:
+      type: integer
+      title: Antelación mínima para reservar (horas)
+      default: 2
+    politica_cancelacion:
+      type: string
+      title: Política de cancelación
+      default: "Se puede cancelar o cambiar sin coste hasta 24 horas antes."
+    senal:
+      type: string
+      title: Señal para reservar
+      enum: [no, opcional, obligatoria]
+      default: "no"
+    tono:
+      type: string
+      title: Tono de voz
+      enum: [cercano, formal]
+      default: cercano
+
+instructions: |
+  Eres el asistente de citas de {{empresa}}. Hablas con un tono {{tono}} y ayudas a reservar, consultar,
+  cambiar o cancelar citas. Servicios disponibles: {{servicios}}.
+
+  Reglas:
+  - Trabajas en la zona horaria {{zona_horaria}}. Interpreta "hoy", "mañana" o "el martes" usando la fecha que te da
+    la plataforma en cada mensaje y confirma siempre la fecha completa (día de la semana y fecha) antes de reservar.
+  - Nunca inventes huecos: consulta SIEMPRE la disponibilidad antes de proponer horas y ofrece 2-3 opciones.
+  - No reserves con menos de {{antelacion_min_horas}} horas de antelación.
+  - Antes de crear la cita, confirma servicio, fecha, hora y nombre del cliente (y teléfono si lo tienes).
+  - Política de cancelación: {{politica_cancelacion}}
+  - Señal para reservar: {{senal}}. Si es obligatoria u opcional y el cliente acepta, solicita el cobro con
+    `pagos__cobrar_senal`: requiere aprobación de una persona del equipo, díselo al cliente.
+  - Si el cliente pide algo que no es una cita (presupuestos, urgencias, reclamaciones), usa la base de
+    conocimiento o escala a una persona.
+
+procedures:
+  - id: reservar
+    title: Reservar una cita
+    when: El cliente quiere pedir cita o pregunta por huecos libres.
+    file: procedures/reservar.md
+  - id: cancelar_reprogramar
+    title: Cancelar o cambiar una cita
+    when: El cliente quiere anular o mover una cita existente.
+    file: procedures/cancelar_reprogramar.md
+  - id: escalado
+    title: Escalado a una persona
+    when: Urgencias, quejas, o el cliente pide hablar con alguien.
+    file: procedures/escalado.md
+
+capabilities:
+  required:
+    calendario.disponibilidad:
+      description: Consultar los huecos libres de un día en la agenda del negocio.
+      tier: read
+    calendario.crear_cita:
+      description: Reservar una cita en un hueco libre de la agenda.
+      tier: write
+    conocimiento.buscar:
+      description: Buscar en la información del negocio (servicios, precios, ubicación, preparación).
+      tier: read
+    humano.escalar:
+      description: Transferir la conversación a una persona del equipo.
+      tier: write
+      approval: never
+  optional:
+    calendario.buscar_citas:
+      description: Buscar las citas existentes de un cliente.
+      tier: read
+    calendario.cancelar_cita:
+      description: Cancelar una cita existente.
+      tier: write
+    pagos.cobrar_senal:
+      description: Cobrar la señal de una cita al cliente.
+      tier: financial
+      approval: always
+      locked: true
+
+autonomy:
+  default: L3
+  max: L4
+
+model:
+  alias: agente-default
+  max_tokens: 2048
+
+guardrails:
+  max_steps_per_turn: 6
+  untrusted_input: true
+  blocked_topics: [diagnóstico médico, asesoramiento legal]
+
+channels: [widget, api, mcp, whatsapp]
+
+knowledge:
+  required: false
+  description: Servicios, precios, dirección, cómo prepararse para la cita.
+
+evals: evals/golden.yaml
