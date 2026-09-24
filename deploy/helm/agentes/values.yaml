@@ -1,0 +1,44 @@
+# Dependencias externas: en SaaS son servicios gestionados; en on-prem, los del cliente o subcharts
+# (bitnami/postgresql con pgvector, temporalio/temporal, litellm).
+image:
+  api: ghcr.io/ovg-code/agentes-api:0.1.0
+  runtime: ghcr.io/ovg-code/agentes-runtime:0.1.0
+  pullPolicy: IfNotPresent
+
+publicBaseUrl: https://agentes.example.com
+runtimeMode: temporal          # temporal (producción) | direct
+
+database:
+  # Se recomienda existingSecret con claves DATABASE_URL y DATABASE_ADMIN_URL
+  existingSecret: ""
+  url: postgres://agentes_app:agentes_app@postgres:5432/agentes
+  adminUrl: postgres://agentes:agentes@postgres:5432/agentes
+
+temporal:
+  address: temporal-frontend:7233
+  namespace: default
+  taskQueue: agentes-runtime
+
+llm:
+  baseUrl: http://litellm:4000
+  provider: gateway            # gateway | fake
+  embeddingsProvider: gateway
+
+secrets:
+  # Secret con VAULT_MASTER_KEY, PLATFORM_ADMIN_TOKEN, INTERNAL_TOKEN y LLM_API_KEY
+  existingSecret: agentes-secrets
+
+replicas:
+  api: 2
+  runtime: 2
+  worker: 2
+
+resources:
+  api: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 512Mi } }
+  runtime: { requests: { cpu: 200m, memory: 256Mi }, limits: { memory: 1Gi } }
+  worker: { requests: { cpu: 200m, memory: 256Mi }, limits: { memory: 1Gi } }
+
+ingress:
+  enabled: false
+  className: nginx
+  host: agentes.example.com

@@ -4,7 +4,7 @@ import { assertCanChat, assertTenantAdmin, type Principal } from "../../shared/a
 import type { Db } from "../../shared/db.js";
 import { badRequest, conflict, notFound } from "../../shared/errors.js";
 import { audit } from "../audit/index.js";
-import { type WebhookDispatcher, type WebhookEvent } from "../channels/webhooks.js";
+import { type WebhookDispatcher, type WebhookEvent } from "../channels/index.js";
 import { Vault } from "../vault/index.js";
 import type { EngineState, RuntimeGateway, TurnInput, TurnResult } from "./runtime.js";
 

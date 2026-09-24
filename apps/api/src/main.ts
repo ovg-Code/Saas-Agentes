@@ -1,6 +1,6 @@
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
-import { DirectRuntime, TemporalRuntime } from "./modules/conversations/runtime.js";
+import { DirectRuntime, TemporalRuntime } from "./modules/conversations/index.js";
 import { createDb } from "./shared/db.js";
 
 const cfg = loadConfig();

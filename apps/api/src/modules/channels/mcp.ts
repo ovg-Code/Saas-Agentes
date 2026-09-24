@@ -1,5 +1,13 @@
 import type { Principal } from "../../shared/auth.js";
-import type { ConversationService } from "../conversations/index.js";
+
+/** Puerto: lo que el canal MCP necesita de las conversaciones (evita depender del módulo concreto). */
+export interface ChatPort {
+  sendMessage(
+    principal: Principal,
+    agentId: string,
+    body: { message: string; conversation_id?: string; channel?: string },
+  ): Promise<{ conversation_id: string; status: string; reply: string; approvals: unknown[] }>;
+}
 
 /**
  * Cada agente es también un SERVIDOR MCP: el Claude/ChatGPT/IDE/CRM del cliente puede usarlo como tool.
@@ -19,7 +27,7 @@ const ok = (id: JsonRpc["id"], result: unknown) => ({ jsonrpc: "2.0", id: id ?? 
 const err = (id: JsonRpc["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 
 export async function handleMcp(
-  conversations: ConversationService,
+  conversations: ChatPort,
   principal: Principal,
   agent: { id: string; name: string },
   msg: JsonRpc,

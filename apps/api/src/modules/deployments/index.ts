@@ -12,7 +12,7 @@ import type { Db } from "../../shared/db.js";
 import { badRequest, forbidden, notFound } from "../../shared/errors.js";
 import { audit } from "../audit/index.js";
 import { upsertConnector } from "../connectors/index.js";
-import type { RuntimeGateway } from "../conversations/runtime.js";
+import type { RuntimeGateway } from "../conversations/index.js";
 import type { TemplateCatalog } from "../templates/index.js";
 import { Vault } from "../vault/index.js";
 

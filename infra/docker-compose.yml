@@ -1,0 +1,104 @@
+# Entorno completo en local:  docker compose -f infra/docker-compose.yml --env-file .env up -d
+# Mismo empaquetado que producción/self-hosted (ver deploy/helm).
+name: agentes
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: agentes
+      POSTGRES_PASSWORD: agentes
+      POSTGRES_DB: agentes
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data, ./init-dbs.sql:/docker-entrypoint-initdb.d/00-init-dbs.sql:ro]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentes"]
+      interval: 5s
+      retries: 20
+
+  migrate:
+    build: { context: .., dockerfile: apps/api/Dockerfile }
+    command: ["node", "apps/api/dist/migrate.js"]
+    environment:
+      DATABASE_ADMIN_URL: postgres://agentes:agentes@postgres:5432/agentes
+      MIGRATIONS_DIR: /app/db/migrations
+    depends_on: { postgres: { condition: service_healthy } }
+
+  temporal:
+    image: temporalio/auto-setup:1.28
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: agentes
+      POSTGRES_PWD: agentes
+      POSTGRES_SEEDS: postgres
+    ports: ["7233:7233"]
+    depends_on: { postgres: { condition: service_healthy } }
+
+  temporal-ui:
+    image: temporalio/ui:2.36.0
+    environment: { TEMPORAL_ADDRESS: temporal:7233 }
+    ports: ["8233:8080"]
+    depends_on: [temporal]
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    volumes: [./litellm.yaml:/app/config.yaml:ro]
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-master}
+      LITELLM_DATABASE_URL: postgres://agentes:agentes@postgres:5432/litellm
+      LANGFUSE_HOST: http://langfuse:3000
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+    ports: ["4000:4000"]
+    depends_on: { postgres: { condition: service_healthy } }
+
+  langfuse:
+    image: langfuse/langfuse:2
+    environment:
+      DATABASE_URL: postgres://agentes:agentes@postgres:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-cambia-esto}
+      SALT: ${LANGFUSE_SALT:-cambia-esto}
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy } }
+
+  runtime:
+    build: { context: .., dockerfile: services/runtime/Dockerfile }
+    environment: &runtime_env
+      DATABASE_URL: postgres://agentes_app:agentes_app@postgres:5432/agentes
+      LLM_PROVIDER: ${LLM_PROVIDER:-gateway}
+      LLM_BASE_URL: http://litellm:4000
+      LLM_API_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-master}
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-fake}
+      CONTROL_PLANE_URL: http://api:8080
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+      TEMPORAL_ADDRESS: temporal:7233
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+  worker:
+    build: { context: .., dockerfile: services/runtime/Dockerfile }
+    command: ["python", "-m", "agentes_runtime.temporal.worker"]
+    environment: *runtime_env
+    depends_on: [temporal, runtime]
+
+  api:
+    build: { context: .., dockerfile: apps/api/Dockerfile }
+    environment:
+      DATABASE_URL: postgres://agentes_app:agentes_app@postgres:5432/agentes
+      DATABASE_ADMIN_URL: postgres://agentes:agentes@postgres:5432/agentes
+      RUNTIME_MODE: ${RUNTIME_MODE:-temporal}
+      RUNTIME_URL: http://runtime:8090
+      TEMPORAL_ADDRESS: temporal:7233
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+      VAULT_MASTER_KEY: ${VAULT_MASTER_KEY:?define VAULT_MASTER_KEY (openssl rand -base64 32)}
+      PLATFORM_ADMIN_TOKEN: ${PLATFORM_ADMIN_TOKEN:?define PLATFORM_ADMIN_TOKEN}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+    ports: ["8080:8080"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+
+volumes:
+  pgdata:

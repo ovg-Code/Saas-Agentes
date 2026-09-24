@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: agentes
+          POSTGRES_PASSWORD: agentes
+          POSTGRES_DB: agentes
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentes" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_ADMIN_URL: postgres://agentes:agentes@localhost:5432/agentes
+      TEST_DATABASE_URL: postgres://agentes_app:agentes_app@localhost:5432/agentes
+      DATABASE_ADMIN_URL: postgres://agentes:agentes@localhost:5432/agentes
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: astral-sh/setup-uv@v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @agentes/agent-spec build
+
+      - name: Tipos y fronteras del monolito modular
+        run: pnpm typecheck && pnpm lint:deps
+
+      - name: Especificación de plantillas (genera el fixture de contrato)
+        run: pnpm --filter @agentes/agent-spec test
+
+      - name: Migraciones
+        run: pnpm --filter @agentes/api migrate
+
+      - name: Runtime Python (contrato, motor, políticas, RAG+RLS, Temporal)
+        working-directory: services/runtime
+        run: uv sync --frozen && uv run pytest -q
+
+      - name: Plano de control (integración con Postgres)
+        run: pnpm --filter @agentes/api test
+
+      - name: E2E despliegue rápido + evals golden (modelo fake)
+        run: ./scripts/e2e.sh
+
+      - name: El fixture de contrato está al día
+        run: git diff --exit-code packages/agent-spec/fixtures

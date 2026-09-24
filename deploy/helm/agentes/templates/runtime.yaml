@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-runtime
+  labels: {{- include "agentes.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas.runtime }}
+  selector: { matchLabels: { app: {{ .Release.Name }}-runtime } }
+  template:
+    metadata: { labels: { app: {{ .Release.Name }}-runtime } }
+    spec:
+      containers:
+        - name: runtime
+          image: {{ .Values.image.runtime }}
+          ports: [{ containerPort: 8090 }]
+          env: {{- include "agentes.runtimeEnv" . | nindent 12 }}
+          readinessProbe: { httpGet: { path: /health, port: 8090 }, periodSeconds: 5 }
+          resources: {{- toYaml .Values.resources.runtime | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: {{ .Release.Name }}-runtime }
+spec:
+  selector: { app: {{ .Release.Name }}-runtime }
+  ports: [{ port: 8090, targetPort: 8090 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-worker
+  labels: {{- include "agentes.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas.worker }}
+  selector: { matchLabels: { app: {{ .Release.Name }}-worker } }
+  template:
+    metadata: { labels: { app: {{ .Release.Name }}-worker } }
+    spec:
+      containers:
+        - name: worker
+          image: {{ .Values.image.runtime }}
+          command: ["python", "-m", "agentes_runtime.temporal.worker"]
+          env: {{- include "agentes.runtimeEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.resources.worker | nindent 12 }}

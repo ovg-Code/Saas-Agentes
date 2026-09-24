@@ -1,0 +1,32 @@
+# Gateway LLM (LiteLLM). El runtime solo conoce ALIAS; qué proveedor/modelo hay detrás se decide aquí.
+# Cambiar de proveedor para todos los clientes = cambiar este fichero, sin tocar código ni plantillas.
+# Cada tenant puede tener su virtual key con presupuesto propio (POST /key/generate con max_budget).
+model_list:
+  - model_name: agente-default          # alias por defecto de las plantillas
+    litellm_params:
+      model: anthropic/claude-opus-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: agente-rapido           # baja latencia/coste (clasificación, voz, alto volumen)
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: agente-default-openai   # ejemplo de proveedor alternativo con el mismo formato
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: embeddings-default
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_key: os.environ/OPENAI_API_KEY
+
+router_settings:
+  # si el modelo principal falla o está saturado, se prueba el siguiente
+  fallbacks: [{ "agente-default": ["agente-default-openai"] }]
+
+litellm_settings:
+  callbacks: ["langfuse"]              # trazas de cada llamada a Langfuse (coste por tenant vía metadata.user_id)
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL   # necesario para virtual keys y presupuestos

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: agentes
+description: Plataforma de agentes (plano de control + runtime + worker). Mismo chart para SaaS, tenant dedicado y on-prem.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

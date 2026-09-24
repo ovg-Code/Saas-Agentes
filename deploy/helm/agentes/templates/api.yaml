@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels: {{- include "agentes.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas.api }}
+  selector: { matchLabels: { app: {{ .Release.Name }}-api } }
+  template:
+    metadata: { labels: { app: {{ .Release.Name }}-api } }
+    spec:
+      containers:
+        - name: api
+          image: {{ .Values.image.api }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ containerPort: 8080 }]
+          env:
+            {{- include "agentes.dbEnv" . | nindent 12 }}
+            - { name: RUNTIME_MODE, value: {{ .Values.runtimeMode | quote }} }
+            - { name: RUNTIME_URL, value: "http://{{ .Release.Name }}-runtime:8090" }
+            - { name: TEMPORAL_ADDRESS, value: {{ .Values.temporal.address | quote }} }
+            - { name: TEMPORAL_NAMESPACE, value: {{ .Values.temporal.namespace | quote }} }
+            - { name: TEMPORAL_TASK_QUEUE, value: {{ .Values.temporal.taskQueue | quote }} }
+            - { name: PUBLIC_BASE_URL, value: {{ .Values.publicBaseUrl | quote }} }
+            {{- range list "VAULT_MASTER_KEY" "PLATFORM_ADMIN_TOKEN" "INTERNAL_TOKEN" }}
+            - name: {{ . }}
+              valueFrom: { secretKeyRef: { name: {{ $.Values.secrets.existingSecret }}, key: {{ . }} } }
+            {{- end }}
+          readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 5 }
+          resources: {{- toYaml .Values.resources.api | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-api
+  labels: {{- include "agentes.labels" . | nindent 4 }}
+spec:
+  selector: { app: {{ .Release.Name }}-api }
+  ports: [{ port: 8080, targetPort: 8080 }]
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: { name: {{ .Release.Name }}-api }
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          # /internal/* NO se publica: solo accesible desde el runtime dentro del clúster.
+          - { path: /v1, pathType: Prefix, backend: { service: { name: {{ .Release.Name }}-api, port: { number: 8080 } } } }
+          - { path: /widget.js, pathType: Exact, backend: { service: { name: {{ .Release.Name }}-api, port: { number: 8080 } } } }
+          - { path: /console, pathType: Exact, backend: { service: { name: {{ .Release.Name }}-api, port: { number: 8080 } } } }
+{{- end }}
