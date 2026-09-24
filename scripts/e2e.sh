@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Prueba de "despliegue rápido" de extremo a extremo, sin coste de LLM (modelo fake):
+#   CRM mock (OpenAPI) + runtime Python + API  ->  `agentes deploy` de un cliente  ->  chat, aprobación, evals.
+# Requiere Postgres con la migración aplicada (DATABASE_ADMIN_URL) — ver docs/desarrollo.md.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+export DATABASE_ADMIN_URL="${DATABASE_ADMIN_URL:-postgres://agentes@localhost:5432/agentes}"
+export DATABASE_URL="${DATABASE_URL:-postgres://agentes_app:agentes_app@localhost:5432/agentes}"
+export PLATFORM_ADMIN_TOKEN="${PLATFORM_ADMIN_TOKEN:-e2e-platform-token}"
+export VAULT_MASTER_KEY="${VAULT_MASTER_KEY:-$(openssl rand -base64 32)}"
+export INTERNAL_TOKEN="${INTERNAL_TOKEN:-e2e-internal}"
+export API_PORT=18080 RUNTIME_URL=http://localhost:18090 PUBLIC_BASE_URL=http://localhost:18080
+export AGENTES_API_URL=http://localhost:18080
+
+LOGS="$(mktemp -d)"
+cleanup() {
+  # los servicios arrancan en subshells: se matan por patrón para no dejar procesos huérfanos
+  pkill -f "agentes_runtime[.]api" 2>/dev/null || true
+  pkill -f "agentes_runtime[.]temporal[.]worker" 2>/dev/null || true
+  pkill -f "src/main[.]ts" 2>/dev/null || true
+  pkill -f "crm-mock/server[.]mjs" 2>/dev/null || true
+  rm -f "$ROOT/examples/clientes/.e2e.yaml"
+  [ "${E2E_OK:-0}" = 1 ] || echo "logs en $LOGS"
+}
+trap cleanup EXIT
+
+CRM_API_KEY=crm-demo-key PORT=9090 node examples/crm-mock/server.mjs >"$LOGS/crm.log" 2>&1 &
+(cd services/runtime && LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake PORT=18090 CONTROL_PLANE_URL=http://localhost:18080 \
+  uv run python -m agentes_runtime.api >"$LOGS/runtime.log" 2>&1) &
+if [ "${RUNTIME_MODE:-direct}" = temporal ]; then
+  # Modo durable: las conversaciones viven en workflows de Temporal (servidor en $TEMPORAL_ADDRESS,
+  # p.ej. `uv run python ../../scripts/temporal-dev.py` o docker compose).
+  (cd services/runtime && LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake CONTROL_PLANE_URL=http://localhost:18080 \
+    uv run python -m agentes_runtime.temporal.worker >"$LOGS/worker.log" 2>&1) &
+fi
+pnpm --filter @agentes/agent-spec build >/dev/null
+(cd apps/api && npx tsx src/main.ts >"$LOGS/api.log" 2>&1) &
+
+for url in http://localhost:18080/health http://localhost:18090/health; do
+  for _ in $(seq 1 60); do curl -sf "$url" >/dev/null && break; sleep 0.5; done
+  curl -sf "$url" >/dev/null || { echo "no arrancó $url"; tail -50 "$LOGS"/*.log; exit 1; }
+done
+
+echo "(modo runtime: ${RUNTIME_MODE:-direct})"
+echo "== 1. Desplegar cliente nuevo desde YAML (un paso) =="
+SLUG="e2e-$(date +%s)"
+sed "s/slug: ferreteria-lopez/slug: $SLUG/" examples/clientes/ferreteria-lopez.yaml > examples/clientes/.e2e.yaml
+
+OUT=$(AGENTES_TOKEN=$PLATFORM_ADMIN_TOKEN CRM_LOPEZ_API_KEY=crm-demo-key node apps/cli/bin/agentes.js deploy examples/clientes/.e2e.yaml)
+echo "$OUT"
+AGENT_KEY=$(echo "$OUT" | sed -n 's/^ *agent *\(ak_[^ ]*\).*/\1/p')
+ADMIN_KEY=$(echo "$OUT" | sed -n 's/^ *admin *\(ak_[^ ]*\).*/\1/p')
+AGENT_ID=$(echo "$OUT" | sed -n 's#.*/v1/agents/\([0-9a-f-]*\)/chat.*#\1#p' | head -1)
+test -n "$AGENT_KEY" && test -n "$ADMIN_KEY" && test -n "$AGENT_ID"
+
+echo "== 2. Pregunta de FAQ (RAG) =="
+AGENTES_TOKEN=$AGENT_KEY node apps/cli/bin/agentes.js chat --agent "$AGENT_ID" "¿Cuánto cuesta el envío?" | tee "$LOGS/faq.txt"
+grep -q "49" "$LOGS/faq.txt"
+
+echo "== 3. Consulta al CRM propio del cliente =="
+AGENTES_TOKEN=$AGENT_KEY node apps/cli/bin/agentes.js chat --agent "$AGENT_ID" "¿Dónde está mi pedido 1001?" | tee "$LOGS/pedido.txt"
+grep -q "en reparto" "$LOGS/pedido.txt"
+
+echo "== 4. Reembolso -> aprobación humana -> ejecución en el CRM =="
+R=$(curl -sf -X POST "$AGENTES_API_URL/v1/agents/$AGENT_ID/chat" -H "authorization: Bearer $AGENT_KEY" -H 'content-type: application/json' \
+  -d '{"message":"Quiero el reembolso del pedido 1001"}')
+echo "$R"
+APPROVAL=$(echo "$R" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);if(j.status!=="awaiting_approval")process.exit(1);console.log(j.approvals[0].id)})')
+test "$(curl -sf http://localhost:9090/_debug | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).reembolsos.length))')" = "0"
+curl -sS --fail-with-body -X POST "$AGENTES_API_URL/v1/approvals/$APPROVAL" -H "authorization: Bearer $ADMIN_KEY" -H 'content-type: application/json' \
+  -d '{"approve":true,"by":"e2e"}'
+echo
+test "$(curl -sf http://localhost:9090/_debug | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).reembolsos.length))')" = "1"
+
+echo "== 5. El agente como servidor MCP =="
+curl -sf -X POST "$AGENTES_API_URL/v1/agents/$AGENT_ID/mcp" -H "authorization: Bearer $AGENT_KEY" -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"preguntar","arguments":{"message":"¿Hacéis copias de llaves?"}}}' | tee "$LOGS/mcp.json"
+grep -q "llaves" "$LOGS/mcp.json"
+echo
+
+echo "== 6. Evals golden de la plantilla =="
+AGENTES_TOKEN=$AGENT_KEY node apps/cli/bin/agentes.js eval --agent "$AGENT_ID" --template templates/atencion-cliente
+
+E2E_OK=1
+echo -e "\n✔ E2E completado"

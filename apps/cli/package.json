@@ -1,0 +1,16 @@
+{
+  "name": "@agentes/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI: desplegar un cliente desde un YAML, ejecutar evals y probar agentes",
+  "bin": { "agentes": "./bin/agentes.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentes/agent-spec": "workspace:*",
+    "yaml": "^2.6.1"
+  }
+}

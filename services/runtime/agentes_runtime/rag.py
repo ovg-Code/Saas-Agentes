@@ -120,7 +120,7 @@ class KnowledgeBase:
                     "VALUES (%s, %s, %s, %s, %s::vector)", (tenant_id, agent_id, doc_id, content, _vec(vec)))
         return len(chunks)
 
-    async def search(self, tenant_id: str, agent_id: str, query: str, k: int = 4) -> list[dict]:
+    async def search(self, tenant_id: str, agent_id: str, query: str, k: int = 4, min_score: float = 0.05) -> list[dict]:
         [qvec] = await self.embedder.embed([query])
         async with tenant_tx(self.pool, tenant_id) as conn:
             cur = await conn.execute(
@@ -130,4 +130,6 @@ class KnowledgeBase:
                    ORDER BY c.embedding <=> %s::vector LIMIT %s""",
                 (_vec(qvec), agent_id, _vec(qvec), k))
             rows = await cur.fetchall()
-        return [{"content": r[0], "title": r[1], "source": r[2], "score": round(float(r[3]), 4)} for r in rows]
+        hits = [{"content": r[0], "title": r[1], "source": r[2], "score": round(float(r[3]), 4)} for r in rows]
+        # Fragmentos sin relación con la consulta solo añaden ruido (y coste) al contexto del modelo.
+        return [h for h in hits if h["score"] >= min_score]
