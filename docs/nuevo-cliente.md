@@ -22,6 +22,37 @@
 8. **Operación** — su equipo usa `/console` con la key admin: aprobaciones pendientes, conversaciones,
    respuesta humana en handoffs, probador.
 
+## Activar WhatsApp
+
+1. Pide al cliente (o créalo con él en Meta Business): el **número** dado de alta en WhatsApp Business Cloud API,
+   su **phone_number_id**, un **token de acceso** permanente (usuario de sistema) y el **app secret** de su app.
+   Inventa un **verify token** cualquiera.
+2. Añade al YAML:
+   ```yaml
+   channels: [widget, api, mcp, whatsapp]
+   channel_settings:
+     whatsapp:
+       phone_number_id: "1234567890"
+       credentials: { access_token: wa-token, app_secret: wa-app-secret, verify_token: wa-verify }
+       reengagement_template: { name: seguimiento_pedido, language: es }   # plantilla aprobada en Meta (opcional)
+   credentials:
+     wa-token: { from_env: WA_ACCESS_TOKEN }
+     wa-app-secret: { from_env: WA_APP_SECRET }
+     wa-verify: { from_env: WA_VERIFY_TOKEN }
+   ```
+3. Despliega y, en Meta → WhatsApp → Configuración, pon como webhook
+   `https://<tu-dominio>/v1/channels/whatsapp/<agent_id>/webhook` con el mismo verify token y suscribe `messages`.
+4. Prueba en local sin Meta: `node examples/whatsapp-mock/server.mjs` (API de Meta simulada, con
+   `WHATSAPP_API_BASE=http://localhost:9092` en la API) y
+   `node examples/whatsapp-mock/send.mjs <wa_id> "hola" <url_webhook> <app_secret>`.
+
+Qué hace la plataforma: verifica la firma de cada webhook, ignora reintentos duplicados, mantiene una
+conversación por número, y envía por WhatsApp también las respuestas diferidas (aprobaciones resueltas,
+respuestas de una persona del equipo). Fuera de la ventana de 24 h solo se puede escribir con una plantilla
+aprobada: si no hay `reengagement_template`, el mensaje no se envía y queda como `channel.outside_window` en la
+auditoría. **Precios**: Meta cobra por mensaje según país y tipo; varias fuentes indican cambios desde el
+2026-10-01 para respuestas dentro de la ventana — verifica la tabla oficial antes de fijar precios al cliente.
+
 Cambios posteriores: edita el YAML y vuelve a desplegar (idempotente; solo crea release si algo cambió).
 Rollback: `POST /v1/agents/<id>/activate {"release_id": "rel_..."}`.
 

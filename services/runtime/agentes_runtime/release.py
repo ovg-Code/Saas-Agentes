@@ -124,6 +124,8 @@ class Release(_Model):
     params: dict[str, Any]
     knowledge_sources: list[str] = []
     webhooks: list[Webhook] = []
+    # Configuración de canales asíncronos (WhatsApp...). La usa el plano de control, no el runtime.
+    channel_settings: dict[str, Any] | None = None
 
     def tool(self, name: str) -> ReleaseTool | None:
         return next((t for t in self.tools if t.name == name), None)

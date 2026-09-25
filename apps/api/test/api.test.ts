@@ -3,7 +3,8 @@
  * Requiere TEST_DATABASE_ADMIN_URL (superusuario/propietario). Crea una BD temporal por ejecución.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -65,13 +66,27 @@ describeDb("plano de control (integración)", () => {
   const deployBody = (overrides: Record<string, unknown> = {}) => ({
     deployment: { ...deploymentYaml(), ...overrides },
     connector_specs: { "crm-lopez": readFileSync(join(ROOT, "examples/crm-mock/openapi.yaml"), "utf8") },
-    secrets: { "crm-lopez-key": "crm-demo-key" },
+    secrets: { "crm-lopez-key": "crm-demo-key", "wa-token": "wa-tok", "wa-app-secret": "wa-secret", "wa-verify": "wa-verify-me" },
     knowledge: [{ source: "faq.md", title: "FAQ", text: "## Devoluciones\n30 días." }],
   });
   const inject = (method: "GET" | "POST", url: string, token: string, payload?: unknown) =>
     app.inject({ method, url, headers: { authorization: `Bearer ${token}` }, ...(payload !== undefined ? { payload: payload as object } : {}) });
 
+  // Simulador de la Graph API de WhatsApp en un proceso hijo
+  const waPort = 19900 + Math.floor(Math.random() * 90);
+  let waMock: ChildProcess;
+  const waSent = async () =>
+    ((await (await fetch(`http://localhost:${waPort}/_debug`)).json()) as { sent: { to: string; type: string; text?: { body: string }; template?: { name: string } }[] }).sent;
+
   beforeAll(async () => {
+    waMock = spawn("node", [join(ROOT, "examples/whatsapp-mock/server.mjs")], {
+      env: { ...process.env, PORT: String(waPort), WA_ACCESS_TOKEN: "wa-tok" },
+      stdio: "ignore",
+    });
+    for (let i = 0; i < 50; i++) {
+      if (await fetch(`http://localhost:${waPort}/_debug`).then(() => true, () => false)) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     const admin = new pg.Client({ connectionString: ADMIN_URL });
     await admin.connect();
     await admin.query(`CREATE DATABASE ${dbName}`);
@@ -80,7 +95,9 @@ describeDb("plano de control (integración)", () => {
     u.pathname = `/${dbName}`;
     const mig = new pg.Client({ connectionString: u.toString() });
     await mig.connect();
-    await mig.query(readFileSync(join(ROOT, "db/migrations/001_init.sql"), "utf8"));
+    for (const f of readdirSync(join(ROOT, "db/migrations")).filter((x) => x.endsWith(".sql")).sort()) {
+      await mig.query(readFileSync(join(ROOT, "db/migrations", f), "utf8"));
+    }
     await mig.end();
     const appUrl = new URL(u.toString());
     appUrl.username = "agentes_app";
@@ -94,10 +111,12 @@ describeDb("plano de control (integración)", () => {
       platformAdminToken: PLATFORM,
       internalToken: INTERNAL,
       publicBaseUrl: "http://api.test",
+      whatsappApiBase: `http://localhost:${waPort}`,
     });
   });
 
   afterAll(async () => {
+    waMock?.kill();
     await app?.close();
     await db?.close();
     const admin = new pg.Client({ connectionString: ADMIN_URL });
@@ -278,6 +297,91 @@ describeDb("plano de control (integración)", () => {
     } finally {
       mock.kill();
     }
+  });
+
+  describe("canal WhatsApp", () => {
+    const url = () => `/v1/channels/whatsapp/${agentId}/webhook`;
+    let n = 0;
+    const inbound = (from: string, text: string, wamid = `wamid.test.${++n}`, secret = "wa-secret") => {
+      const body = JSON.stringify({
+        object: "whatsapp_business_account",
+        entry: [{ changes: [{ field: "messages", value: {
+          metadata: { phone_number_id: "555000111" },
+          messages: [{ from, id: wamid, type: "text", text: { body: text } }],
+        } }] }],
+      });
+      const sig = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+      return app.inject({ method: "POST", url: url(), payload: body, headers: { "content-type": "application/json", "x-hub-signature-256": sig } });
+    };
+    const settle = () => (app as unknown as { whatsapp: { idle(): Promise<void> } }).whatsapp.idle();
+
+    it("verificación del webhook de Meta", async () => {
+      const ok = await app.inject({ method: "GET", url: `${url()}?hub.mode=subscribe&hub.verify_token=wa-verify-me&hub.challenge=12345` });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.body).toBe("12345");
+      const bad = await app.inject({ method: "GET", url: `${url()}?hub.mode=subscribe&hub.verify_token=otro&hub.challenge=1` });
+      expect(bad.statusCode).toBe(403);
+    });
+
+    it("firma inválida -> 401 y ningún turno", async () => {
+      const before = runtime.calls.length;
+      const r = await inbound("34611111111", "hola", undefined, "secreto-falso");
+      expect(r.statusCode).toBe(401);
+      await settle();
+      expect(runtime.calls.length).toBe(before);
+    });
+
+    it("mensaje entrante -> turno -> respuesta enviada por WhatsApp; reintentos de Meta deduplicados", async () => {
+      const before = runtime.calls.length;
+      expect((await inbound("34611111111", "hola por whatsapp", "wamid.dup")).statusCode).toBe(200);
+      expect((await inbound("34611111111", "hola por whatsapp", "wamid.dup")).statusCode).toBe(200); // reintento
+      await settle();
+      expect(runtime.calls.length).toBe(before + 1);
+      const sent = await waSent();
+      expect(sent.at(-1)).toMatchObject({ to: "34611111111", type: "text", text: { body: "eco: hola por whatsapp" } });
+
+      // el segundo mensaje del mismo número continúa la MISMA conversación
+      await inbound("34611111111", "sigo aquí");
+      await settle();
+      const { rows } = await db.admin.query("SELECT count(*)::int AS n FROM conversations WHERE channel = 'whatsapp' AND external_user = '34611111111'");
+      expect(rows[0].n).toBe(1);
+    });
+
+    it("la aprobación resuelta más tarde también llega por WhatsApp", async () => {
+      await inbound("34622222222", "quiero un reembolso del 1001");
+      await settle();
+      const pending = (await inject("GET", "/v1/approvals", adminKey)).json().approvals;
+      const mine = pending.at(-1);
+      await inject("POST", `/v1/approvals/${mine.id}`, adminKey, { approve: true, by: "ana" });
+      const sent = (await waSent()).filter((m) => m.to === "34622222222").map((m) => m.text?.body);
+      expect(sent).toEqual(["Una persona revisará el reembolso.", "Reembolso emitido."]);
+    });
+
+    it("una respuesta humana en el handoff sale por WhatsApp", async () => {
+      const conv = (await db.admin.query("SELECT id FROM conversations WHERE external_user = '34611111111'")).rows[0].id;
+      await inject("POST", `/v1/conversations/${conv}/human-reply`, adminKey, { text: "Hola, soy Ana del equipo", by: "ana" });
+      expect((await waSent()).at(-1)).toMatchObject({ to: "34611111111", text: { body: "Hola, soy Ana del equipo" } });
+    });
+
+    it("fuera de la ventana de 24 h se usa la plantilla aprobada", async () => {
+      const conv = (await db.admin.query("SELECT id FROM conversations WHERE external_user = '34611111111'")).rows[0].id;
+      await db.admin.query("UPDATE conversations SET last_customer_at = now() - interval '25 hours' WHERE id = $1", [conv]);
+      await inject("POST", `/v1/conversations/${conv}/human-reply`, adminKey, { text: "¿Sigues ahí?", by: "ana" });
+      expect((await waSent()).at(-1)).toMatchObject({ to: "34611111111", type: "template", template: { name: "seguimiento_pedido" } });
+      const audit = await db.admin.query("SELECT action FROM audit_log WHERE conversation_id = $1 ORDER BY id DESC LIMIT 1", [conv]);
+      expect(audit.rows[0].action).toBe("channel.template_sent");
+    });
+
+    it("fuera de ventana y sin plantilla no se envía nada (y se sabe por qué)", async () => {
+      const wa = (app as unknown as { whatsapp: { send(m: object): Promise<{ status: string }> } }).whatsapp;
+      const { rows } = await db.admin.query("SELECT r.release FROM agents a JOIN releases r ON r.id = a.active_release_id WHERE a.id = $1", [agentId]);
+      const release = structuredClone(rows[0].release);
+      delete release.channel_settings.whatsapp.reengagement_template;
+      const before = (await waSent()).length;
+      const out = await wa.send({ tenantId, conversationId: "x", to: "34699999999", text: "hola", release, lastCustomerAt: new Date(Date.now() - 48 * 3600e3) });
+      expect(out.status).toBe("outside_window");
+      expect((await waSent()).length).toBe(before);
+    });
   });
 
   it("sirve el widget, la consola y el catálogo con el formulario de parámetros", async () => {

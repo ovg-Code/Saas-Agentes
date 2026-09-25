@@ -32,7 +32,7 @@ flowchart LR
     W[Widget web<br/>1 línea script]
     A[API REST]
     M[Servidor MCP<br/>por agente]
-    WA[WhatsApp / email / voz<br/>roadmap]
+    WA[WhatsApp ✔<br/>email / voz: roadmap]
   end
 
   subgraph CP["Plano de control (TypeScript, monolito modular)"]
@@ -204,6 +204,14 @@ vía gateway en producción; embeddings léxicos deterministas en desarrollo. Pa
 cuando latencia o tamaño lo exijan (el caveat conocido de pgvector es el post-filtrado en tenants pequeños dentro
 de tablas grandes; la solución es particionar por tenant o mover tenants grandes a su propio almacén).
 
+### Canales asíncronos (WhatsApp)
+
+La respuesta no vuelve en la petición: todo texto para el cliente sale por un único puerto (`ChannelSender`),
+incluidas las respuestas diferidas (aprobación resuelta, respuesta humana, expiración en Temporal). Entrada por
+webhook por agente con firma HMAC, 200 inmediato, deduplicación por `wamid` y una conversación por número.
+Ventana de 24 h controlada con `last_customer_at`: fuera de ella, plantilla aprobada o no se envía. Ver
+[ADR 0008](adr/0008-canales-asincronos.md) y la sección *Activar WhatsApp* de [nuevo-cliente](nuevo-cliente.md).
+
 ## 6. Multi-tenancy y seguridad
 
 - **RLS forzada** en todas las tablas de tenant (`ENABLE` + `FORCE ROW LEVEL SECURITY`), tenant fijado con
@@ -286,7 +294,7 @@ versión de regla/modelo.
 | Fase | Contenido |
 |---|---|
 | **1 ✔** | Plantilla atención al cliente · 4 capas · OpenAPI→tools · MCP entrada · widget · aprobaciones · handoff · RLS · bóveda · Temporal · CLI · evals · Helm |
-| **2 (en curso)** | ✔ Plantilla **agendar citas** (sin cambios en el motor) · ✔ conectores **MCP de salida** con descubrimiento `tools/list` al desplegar · ✔ hora del turno en la zona del cliente · pendiente: OAuth por tenant (Google/Outlook vía Nango), WhatsApp y email, streaming SSE |
+| **2 (en curso)** | ✔ Plantilla **agendar citas** (sin cambios en el motor) · ✔ conectores **MCP de salida** con descubrimiento `tools/list` al desplegar · ✔ hora del turno en la zona del cliente · ✔ **canal WhatsApp** (webhook firmado, deduplicación, ventana de 24 h, respuestas diferidas; [ADR 0008](adr/0008-canales-asincronos.md)) · pendiente: OAuth por tenant (Google/Outlook vía Nango), email, streaming SSE |
 | 3 | Plantillas **inventario** y **CRM operado por agentes** · triggers por evento/cron (el agente actúa sin que nadie escriba) · virtual keys de LiteLLM por tenant automáticas · spans OTel GenAI |
 | 4 | Plantilla **conciliaciones**: motor determinista + LLM para excepciones + aprobaciones por lotes |
 | 5 | **Agentes autónomos** (L4-L5) con objetivos, presupuestos y memoria · multi-agente (un agente delega en otro vía A2A/MCP) · voz (LiveKit) · marketplace de plantillas · sandbox de código (E2B/Firecracker) para tools generadas |

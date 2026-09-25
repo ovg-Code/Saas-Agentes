@@ -5,24 +5,42 @@
   "description": "Capa 3: lo único que se escribe por cliente. Sin código y sin secretos (solo referencias).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["tenant", "agent", "template"],
+  "required": [
+    "tenant",
+    "agent",
+    "template"
+  ],
   "properties": {
     "tenant": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["slug"],
+      "required": [
+        "slug"
+      ],
       "properties": {
-        "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$" },
-        "name": { "type": "string" }
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"
+        },
+        "name": {
+          "type": "string"
+        }
       }
     },
     "agent": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["slug"],
+      "required": [
+        "slug"
+      ],
       "properties": {
-        "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$" },
-        "name": { "type": "string" }
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"
+        },
+        "name": {
+          "type": "string"
+        }
       }
     },
     "template": {
@@ -30,35 +48,72 @@
       "pattern": "^[a-z0-9][a-z0-9-]{1,62}@[\\^~]?\\d+(\\.\\d+){0,2}$",
       "description": "id@rango semver, p.ej. atencion-cliente@^1.0"
     },
-    "params": { "type": "object" },
+    "params": {
+      "type": "object"
+    },
     "connectors": {
       "type": "array",
-      "items": { "$ref": "#/$defs/connector" }
+      "items": {
+        "$ref": "#/$defs/connector"
+      }
     },
     "bindings": {
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$" },
-      "additionalProperties": { "$ref": "#/$defs/binding" }
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/binding"
+      }
     },
     "credentials": {
       "type": "object",
       "description": "Nombre -> de dónde sale el secreto. Nunca el secreto en claro.",
-      "additionalProperties": { "$ref": "#/$defs/credentialSource" }
+      "additionalProperties": {
+        "$ref": "#/$defs/credentialSource"
+      }
     },
     "knowledge": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["source"],
+        "required": [
+          "source"
+        ],
         "properties": {
-          "source": { "type": "string", "description": "Ruta local (CLI), URL http(s) o texto con prefijo text:" },
-          "title": { "type": "string" }
+          "source": {
+            "type": "string",
+            "description": "Ruta local (CLI), URL http(s) o texto con prefijo text:"
+          },
+          "title": {
+            "type": "string"
+          }
         }
       }
     },
-    "channels": { "type": "array", "items": { "enum": ["widget", "api", "mcp", "whatsapp", "email", "voice"] } },
-    "autonomy": { "enum": ["L1", "L2", "L3", "L4", "L5"] },
+    "channels": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "widget",
+          "api",
+          "mcp",
+          "whatsapp",
+          "email",
+          "voice"
+        ]
+      }
+    },
+    "autonomy": {
+      "enum": [
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5"
+      ]
+    },
     "overrides": {
       "type": "object",
       "additionalProperties": false,
@@ -68,15 +123,32 @@
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
-            "properties": { "approval": { "enum": ["policy", "always", "never"] } }
+            "properties": {
+              "approval": {
+                "enum": [
+                  "policy",
+                  "always",
+                  "never"
+                ]
+              }
+            }
           }
         },
         "model": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "alias": { "type": "string" }, "max_tokens": { "type": "integer" } }
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "max_tokens": {
+              "type": "integer"
+            }
+          }
         },
-        "guardrails": { "type": "object" }
+        "guardrails": {
+          "type": "object"
+        }
       }
     },
     "webhooks": {
@@ -85,11 +157,91 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["url", "events"],
+        "required": [
+          "url",
+          "events"
+        ],
         "properties": {
-          "url": { "type": "string", "format": "uri" },
-          "events": { "type": "array", "items": { "enum": ["message.created", "tool.executed", "approval.requested", "handoff.requested"] } },
-          "secret": { "type": "string", "description": "Nombre de la credencial usada para firmar (HMAC)." }
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "message.created",
+                "tool.executed",
+                "approval.requested",
+                "handoff.requested"
+              ]
+            }
+          },
+          "secret": {
+            "type": "string",
+            "description": "Nombre de la credencial usada para firmar (HMAC)."
+          }
+        }
+      }
+    },
+    "channel_settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuración de canales que la necesitan (p.ej. WhatsApp). Solo referencias a credenciales.",
+      "properties": {
+        "whatsapp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "phone_number_id",
+            "credentials"
+          ],
+          "properties": {
+            "phone_number_id": {
+              "type": "string",
+              "description": "ID del número en WhatsApp Business (Meta)"
+            },
+            "credentials": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "access_token",
+                "app_secret",
+                "verify_token"
+              ],
+              "properties": {
+                "access_token": {
+                  "type": "string",
+                  "description": "Nombre en `credentials` del token de acceso (Graph API)"
+                },
+                "app_secret": {
+                  "type": "string",
+                  "description": "Nombre en `credentials` del app secret (firma de webhooks)"
+                },
+                "verify_token": {
+                  "type": "string",
+                  "description": "Nombre en `credentials` del verify token del webhook"
+                }
+              }
+            },
+            "reengagement_template": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "language"
+              ],
+              "description": "Plantilla aprobada por Meta para escribir fuera de la ventana de 24 h",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "language": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -98,43 +250,105 @@
     "connector": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "type"],
+      "required": [
+        "id",
+        "type"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$" },
-        "type": { "enum": ["openapi", "mcp"] },
-        "spec": { "type": "string", "description": "openapi: ruta o URL del documento OpenAPI 3.x" },
-        "url": { "type": "string", "description": "mcp: URL del servidor MCP remoto" },
-        "base_url": { "type": "string", "description": "openapi: sobreescribe servers[0].url" },
-        "auth": { "$ref": "#/$defs/auth" }
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"
+        },
+        "type": {
+          "enum": [
+            "openapi",
+            "mcp"
+          ]
+        },
+        "spec": {
+          "type": "string",
+          "description": "openapi: ruta o URL del documento OpenAPI 3.x"
+        },
+        "url": {
+          "type": "string",
+          "description": "mcp: URL del servidor MCP remoto"
+        },
+        "base_url": {
+          "type": "string",
+          "description": "openapi: sobreescribe servers[0].url"
+        },
+        "auth": {
+          "$ref": "#/$defs/auth"
+        }
       }
     },
     "auth": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "properties": {
-        "type": { "enum": ["none", "api_key", "bearer", "basic"] },
-        "header": { "type": "string", "description": "api_key: cabecera donde va la clave (por defecto X-API-Key)" },
-        "credential": { "type": "string", "description": "Nombre en `credentials`." }
+        "type": {
+          "enum": [
+            "none",
+            "api_key",
+            "bearer",
+            "basic"
+          ]
+        },
+        "header": {
+          "type": "string",
+          "description": "api_key: cabecera donde va la clave (por defecto X-API-Key)"
+        },
+        "credential": {
+          "type": "string",
+          "description": "Nombre en `credentials`."
+        }
       }
     },
     "binding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["connector"],
+      "required": [
+        "connector"
+      ],
       "properties": {
-        "connector": { "type": "string", "description": "id del conector, o 'builtin'" },
-        "operation": { "type": "string", "description": "openapi: operationId o 'METHOD /ruta'. mcp: nombre de la tool." }
+        "connector": {
+          "type": "string",
+          "description": "id del conector, o 'builtin'"
+        },
+        "operation": {
+          "type": "string",
+          "description": "openapi: operationId o 'METHOD /ruta'. mcp: nombre de la tool."
+        }
       }
     },
     "credentialSource": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "from_env": { "type": "string", "description": "La CLI lee la variable de entorno y la sube cifrada a la bóveda." },
-        "vault": { "type": "string", "description": "Referencia a una credencial ya existente en la bóveda." }
+        "from_env": {
+          "type": "string",
+          "description": "La CLI lee la variable de entorno y la sube cifrada a la bóveda."
+        },
+        "vault": {
+          "type": "string",
+          "description": "Referencia a una credencial ya existente en la bóveda."
+        }
       },
-      "oneOf": [{ "required": ["from_env"] }, { "required": ["vault"] }]
+      "oneOf": [
+        {
+          "required": [
+            "from_env"
+          ]
+        },
+        {
+          "required": [
+            "vault"
+          ]
+        }
+      ]
     }
   }
 }

@@ -1,0 +1,8 @@
+{
+  "name": "@agentes/whatsapp-mock",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Simulador de la Graph API de WhatsApp Cloud + script para enviar webhooks firmados",
+  "scripts": { "start": "node server.mjs" }
+}

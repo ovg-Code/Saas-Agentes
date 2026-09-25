@@ -32,10 +32,21 @@ bindings:
 # Nunca secretos en claro: la CLI lee la variable y la sube cifrada a la bóveda.
 credentials:
   crm-lopez-key: { from_env: CRM_LOPEZ_API_KEY }
+  wa-token: { from_env: WA_ACCESS_TOKEN }
+  wa-app-secret: { from_env: WA_APP_SECRET }
+  wa-verify: { from_env: WA_VERIFY_TOKEN }
 
 knowledge:
   - source: ./ferreteria-lopez-faq.md
     title: FAQ Ferretería López
 
-channels: [widget, api, mcp]
+channels: [widget, api, mcp, whatsapp]
+
+# WhatsApp Business (Cloud API): la plataforma da la URL del webhook para configurarla en Meta.
+channel_settings:
+  whatsapp:
+    phone_number_id: "555000111"
+    credentials: { access_token: wa-token, app_secret: wa-app-secret, verify_token: wa-verify }
+    reengagement_template: { name: seguimiento_pedido, language: es }
+
 autonomy: L3

@@ -4,7 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { authenticate, bearer, type Principal } from "./shared/auth.js";
 import type { Db } from "./shared/db.js";
 import { badRequest, forbidden, HttpError } from "./shared/errors.js";
-import { handleMcp, WebhookDispatcher } from "./modules/channels/index.js";
+import { handleMcp, WebhookDispatcher, WhatsAppChannel } from "./modules/channels/index.js";
 import { ConversationService, type RuntimeGateway } from "./modules/conversations/index.js";
 import { type DeployRequest, DeploymentService } from "./modules/deployments/index.js";
 import { registerInternalRoutes } from "./modules/internal/index.js";
@@ -20,6 +20,9 @@ export interface AppDeps {
   internalToken: string;
   publicBaseUrl: string;
   webhooks?: WebhookDispatcher;
+  /** Base de la Graph API de WhatsApp (en tests, un simulador). */
+  whatsappApiBase?: string;
+  fetchImpl?: typeof fetch;
   logger?: boolean;
 }
 
@@ -29,7 +32,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 10 * 1024 * 1024 });
   const vault = new Vault(deps.vaultMasterKey);
   const templates = new TemplateCatalog(deps.templatesDir);
-  const conversations = new ConversationService(deps.db, deps.runtime, vault, deps.webhooks ?? new WebhookDispatcher());
+  const whatsapp = new WhatsAppChannel(deps.db, vault, deps.whatsappApiBase ?? "https://graph.facebook.com/v23.0", deps.fetchImpl, (m, e) =>
+    app.log.error({ err: e }, m),
+  );
+  const conversations = new ConversationService(deps.db, deps.runtime, vault, deps.webhooks ?? new WebhookDispatcher(), [whatsapp]);
+  whatsapp.attach(conversations);
+  app.decorate("whatsapp", whatsapp);
   const deployments = new DeploymentService(deps.db, templates, vault, deps.runtime, deps.publicBaseUrl);
 
   // El widget se embebe en webs de clientes: CORS abierto solo para chat.
@@ -124,6 +132,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return conversations.decideApproval(await principal(req), req.params.id, req.body.approve, req.body.by ?? "equipo", req.body.note);
   });
 
+  whatsapp.registerRoutes(app);
   registerInternalRoutes(app, { db: deps.db, vault, conversations, internalToken: deps.internalToken });
   return app;
 }

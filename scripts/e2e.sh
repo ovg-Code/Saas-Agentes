@@ -12,6 +12,7 @@ export PLATFORM_ADMIN_TOKEN="${PLATFORM_ADMIN_TOKEN:-e2e-platform-token}"
 export VAULT_MASTER_KEY="${VAULT_MASTER_KEY:-$(openssl rand -base64 32)}"
 export INTERNAL_TOKEN="${INTERNAL_TOKEN:-e2e-internal}"
 export API_PORT=18080 RUNTIME_URL=http://localhost:18090 PUBLIC_BASE_URL=http://localhost:18080
+export WHATSAPP_API_BASE=http://localhost:9092 WA_ACCESS_TOKEN=wa-demo-token WA_APP_SECRET=wa-demo-secret WA_VERIFY_TOKEN=wa-demo-verify
 export AGENTES_API_URL=http://localhost:18080
 
 LOGS="$(mktemp -d)"
@@ -22,6 +23,7 @@ cleanup() {
   pkill -f "src/main[.]ts" 2>/dev/null || true
   pkill -f "crm-mock/server[.]mjs" 2>/dev/null || true
   pkill -f "agenda-mock/server[.]mjs" 2>/dev/null || true
+  pkill -f "whatsapp-mock/server[.]mjs" 2>/dev/null || true
   rm -f "$ROOT/examples/clientes/.e2e.yaml" "$ROOT/examples/clientes/.e2e-citas.yaml"
   [ "${E2E_OK:-0}" = 1 ] || echo "logs en $LOGS"
 }
@@ -29,6 +31,9 @@ trap cleanup EXIT
 
 CRM_API_KEY=crm-demo-key PORT=9090 node examples/crm-mock/server.mjs >"$LOGS/crm.log" 2>&1 &
 AGENDA_TOKEN=agenda-demo-token PORT=9091 node examples/agenda-mock/server.mjs >"$LOGS/agenda.log" 2>&1 &
+PORT=9092 node examples/whatsapp-mock/server.mjs >"$LOGS/whatsapp.log" 2>&1 &
+# espera hasta que un comando tenga éxito (canales asíncronos: la respuesta no vuelve en la petición)
+wait_for() { for _ in $(seq 1 50); do eval "$1" >/dev/null 2>&1 && return 0; sleep 0.2; done; echo "timeout esperando: $1"; return 1; }
 json() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(eval(process.argv[1]))})' "$1"; }
 (cd services/runtime && LLM_PROVIDER=fake EMBEDDINGS_PROVIDER=fake PORT=18090 CONTROL_PLANE_URL=http://localhost:18080 \
   uv run python -m agentes_runtime.api >"$LOGS/runtime.log" 2>&1) &
@@ -115,6 +120,22 @@ curl -sS --fail-with-body -X POST "$AGENTES_API_URL/v1/approvals/$(echo "$R" | j
 test "$(curl -sf http://localhost:9091/_debug | json 'j.cobros.length')" = "1"
 
 AGENTES_TOKEN=$CITAS_KEY node apps/cli/bin/agentes.js eval --agent "$CITAS_ID" --template templates/agendar-citas
+
+echo "== 8. Canal WhatsApp: el cliente escribe al número de la ferretería =="
+WA_URL="$AGENTES_API_URL/v1/channels/whatsapp/$AGENT_ID/webhook"
+test "$(curl -sf "$WA_URL?hub.mode=subscribe&hub.verify_token=$WA_VERIFY_TOKEN&hub.challenge=ok123")" = "ok123"
+node examples/whatsapp-mock/send.mjs 34600111222 "¿Dónde está mi pedido 1001?" "$WA_URL" "$WA_APP_SECRET"
+wait_for 'curl -sf http://localhost:9092/_debug | grep -q "en reparto"'
+curl -sf http://localhost:9092/_debug | json 'j.sent.at(-1).to + " <- " + j.sent.at(-1).text.body'
+
+node examples/whatsapp-mock/send.mjs 34600111222 "Quiero el reembolso del pedido 1002" "$WA_URL" "$WA_APP_SECRET"
+wait_for 'curl -sf "$AGENTES_API_URL/v1/approvals" -H "authorization: Bearer $ADMIN_KEY" | grep -q 1002'
+APPROVAL=$(curl -sf "$AGENTES_API_URL/v1/approvals" -H "authorization: Bearer $ADMIN_KEY" | json 'j.approvals.find(a=>a.input.numero==="1002").id')
+curl -sS --fail-with-body -X POST "$AGENTES_API_URL/v1/approvals/$APPROVAL" -H "authorization: Bearer $ADMIN_KEY" \
+  -H 'content-type: application/json' -d '{"approve":true,"by":"e2e"}' >/dev/null
+wait_for 'curl -sf http://localhost:9092/_debug | grep -q "pedido[^,]*1002"'
+echo "resultado del reembolso enviado por WhatsApp:"
+curl -sf http://localhost:9092/_debug | json 'j.sent.at(-1).text.body'
 
 E2E_OK=1
 echo -e "\n✔ E2E completado"

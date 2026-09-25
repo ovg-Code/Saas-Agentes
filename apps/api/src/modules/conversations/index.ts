@@ -15,10 +15,38 @@ interface ConversationRow {
   tenant_id: string;
   agent_id: string;
   release_id: string;
+  channel: string;
+  external_user: string | null;
+  last_customer_at: Date | null;
   status: string;
   state: EngineState | null;
   release: Release;
 }
+
+/**
+ * Puerto de salida para canales asíncronos (WhatsApp, email...). En esos canales la respuesta no vuelve
+ * en la petición HTTP: hay que ENVIARLA. Todo lo que genera texto para el cliente (respuesta del agente,
+ * aprobación resuelta, respuesta humana, expiración en Temporal) sale por aquí: un único camino.
+ */
+export interface OutboundMessage {
+  tenantId: string;
+  conversationId: string;
+  channel: string;
+  to: string;
+  text: string;
+  release: Release;
+  lastCustomerAt: Date | null;
+}
+
+export type DeliveryStatus = "sent" | "template_sent" | "outside_window" | "failed";
+
+export interface ChannelSender {
+  readonly channels: readonly string[];
+  send(msg: OutboundMessage): Promise<{ status: DeliveryStatus; detail?: string }>;
+}
+
+/** Canales en los que un cliente final tiene UNA conversación abierta que se reutiliza entre mensajes. */
+const THREADED_CHANNELS = new Set(["whatsapp", "email"]);
 
 export interface ChatResponse {
   conversation_id: string;
@@ -49,6 +77,7 @@ export class ConversationService {
     private readonly runtime: RuntimeGateway,
     private readonly vault: Vault,
     private readonly webhooks: WebhookDispatcher,
+    private readonly senders: ChannelSender[] = [],
   ) {}
 
   // ------------------------------------------------------------------ entradas
@@ -69,6 +98,14 @@ export class ConversationService {
         if (existing.agent_id !== agentId) throw notFound("conversación no encontrada");
         return existing;
       }
+      if (body.channel && THREADED_CHANNELS.has(body.channel) && body.user) {
+        const open = await c.query(
+          `SELECT id FROM conversations WHERE agent_id = $1 AND channel = $2 AND external_user = $3 AND status <> 'closed'
+           ORDER BY updated_at DESC LIMIT 1`,
+          [agentId, body.channel, body.user],
+        );
+        if (open.rows[0]) return this.load(c, open.rows[0].id);
+      }
       const { rows } = await c.query(
         "SELECT active_release_id FROM agents WHERE id = $1",
         [agentId],
@@ -83,13 +120,15 @@ export class ConversationService {
       return this.load(c, ins.rows[0].id);
     });
 
-    await this.db.withTenant(tenantId, (c) =>
-      c.query("INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1, $2, 'customer', $3)", [
+    await this.db.withTenant(tenantId, async (c) => {
+      await c.query("INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1, $2, 'customer', $3)", [
         tenantId,
         conv.id,
         body.message,
-      ]),
-    );
+      ]);
+      await c.query("UPDATE conversations SET last_customer_at = now() WHERE id = $1", [conv.id]);
+    });
+    conv.last_customer_at = new Date();
     return this.turn(conv, { kind: "user_message", text: body.message }, principalLabel(principal));
   }
 
@@ -138,7 +177,9 @@ export class ConversationService {
     await this.db.withTenant(tenantId, (c) =>
       c.query("INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1, $2, 'human', $3)", [tenantId, conv.id, text]),
     );
-    return this.turn(conv, { kind: "human_reply", text, resume_bot: resumeBot }, by);
+    const res = await this.turn(conv, { kind: "human_reply", text, resume_bot: resumeBot }, by);
+    await this.deliver(conv, text); // en canales asíncronos, la respuesta de la persona también hay que enviarla
+    return res;
   }
 
   /** Resultado producido por el runtime sin petición del plano de control (p.ej. aprobación expirada en Temporal). */
@@ -268,6 +309,8 @@ export class ConversationService {
       );
     });
 
+    if (result.reply) await this.deliver(conv, result.reply);
+
     if (conv.release.webhooks.length && webhookQueue.length) {
       const secrets = await this.webhookSecrets(conv);
       for (const [event, payload] of webhookQueue) this.webhooks.dispatch(conv.release, event, payload, secrets);
@@ -283,6 +326,32 @@ export class ConversationService {
     };
   }
 
+  /** Envía texto al cliente final si la conversación es de un canal asíncrono, y audita el resultado. */
+  private async deliver(conv: ConversationRow, text: string): Promise<void> {
+    const sender = this.senders.find((s) => s.channels.includes(conv.channel));
+    if (!sender || !conv.external_user || !text) return;
+    const outcome = await sender
+      .send({
+        tenantId: conv.tenant_id,
+        conversationId: conv.id,
+        channel: conv.channel,
+        to: conv.external_user,
+        text,
+        release: conv.release,
+        lastCustomerAt: conv.last_customer_at,
+      })
+      .catch((e: Error) => ({ status: "failed" as const, detail: e.message }));
+    await this.db.withTenant(conv.tenant_id, (c) =>
+      audit(c, conv.tenant_id, [{
+        actor: `canal:${conv.channel}`,
+        action: outcome.status === "failed" ? "channel.send_failed" : outcome.status === "outside_window" ? "channel.outside_window" : `channel.${outcome.status}`,
+        conversationId: conv.id,
+        releaseId: conv.release_id,
+        data: { to: conv.external_user, chars: text.length, ...(outcome.detail ? { detail: outcome.detail } : {}) },
+      }]),
+    );
+  }
+
   private async webhookSecrets(conv: ConversationRow): Promise<Record<string, string>> {
     const refs = conv.release.webhooks.map((w) => w.secret_ref).filter((r): r is string => Boolean(r));
     if (!refs.length) return {};
@@ -295,7 +364,8 @@ export class ConversationService {
 
   private async load(c: pg.PoolClient, id: string): Promise<ConversationRow> {
     const { rows } = await c.query(
-      `SELECT cv.id, cv.tenant_id, cv.agent_id, cv.release_id, cv.status, cv.state, r.release
+      `SELECT cv.id, cv.tenant_id, cv.agent_id, cv.release_id, cv.channel, cv.external_user, cv.last_customer_at,
+              cv.status, cv.state, r.release
        FROM conversations cv JOIN releases r ON r.id = cv.release_id WHERE cv.id = $1`,
       [id],
     );

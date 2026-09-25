@@ -113,6 +113,21 @@ export interface Deployment {
     guardrails?: Guardrails;
   };
   webhooks?: { url: string; events: string[]; secret?: string }[];
+  channel_settings?: {
+    whatsapp?: {
+      phone_number_id: string;
+      credentials: { access_token: string; app_secret: string; verify_token: string };
+      reengagement_template?: { name: string; language: string };
+    };
+  };
+}
+
+export interface WhatsAppSettings {
+  phone_number_id: string;
+  access_token_ref: string;
+  app_secret_ref: string;
+  verify_token_ref: string;
+  reengagement_template?: { name: string; language: string };
 }
 
 // ---------- Capa 4: release ----------
@@ -164,6 +179,7 @@ export interface Release {
   params: Record<string, unknown>;
   knowledge_sources: string[];
   webhooks: { url: string; events: string[]; secret_ref?: string }[];
+  channel_settings?: { whatsapp?: WhatsAppSettings };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

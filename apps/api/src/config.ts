@@ -14,6 +14,7 @@ export interface Config {
   vaultMasterKey: Buffer;
   platformAdminToken: string;
   templatesDir: string;
+  whatsappApiBase: string;
 }
 
 function required(name: string, value: string | undefined): string {
@@ -39,6 +40,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     temporalTaskQueue: env.TEMPORAL_TASK_QUEUE ?? "agentes-runtime",
     vaultMasterKey: key,
     platformAdminToken: required("PLATFORM_ADMIN_TOKEN", env.PLATFORM_ADMIN_TOKEN),
+    whatsappApiBase: env.WHATSAPP_API_BASE ?? "https://graph.facebook.com/v23.0",
     templatesDir: resolve(env.TEMPLATES_DIR ?? new URL("../../../templates", import.meta.url).pathname),
   };
 }

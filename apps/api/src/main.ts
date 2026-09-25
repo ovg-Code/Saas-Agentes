@@ -19,6 +19,7 @@ const app = buildApp({
   platformAdminToken: cfg.platformAdminToken,
   internalToken: cfg.internalToken,
   publicBaseUrl: cfg.publicBaseUrl,
+  whatsappApiBase: cfg.whatsappApiBase,
   logger: true,
 });
 

@@ -68,6 +68,8 @@ importers:
 
   examples/crm-mock: {}
 
+  examples/whatsapp-mock: {}
+
   packages/agent-spec:
     dependencies:
       ajv:

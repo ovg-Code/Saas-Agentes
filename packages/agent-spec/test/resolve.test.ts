@@ -28,7 +28,12 @@ const crm = importOpenApi(readYaml(CRM_OPENAPI) as Record<string, unknown>);
 const catalogs: Record<string, ConnectorCatalog> = {
   "crm-lopez": { id: "crm-lopez", type: "openapi", base_url: crm.base_url, operations: crm.operations },
 };
-const credentialRefs = { "crm-lopez-key": "vault://ferreteria-lopez/crm-lopez-key" };
+const credentialRefs = {
+  "crm-lopez-key": "vault://ferreteria-lopez/crm-lopez-key",
+  "wa-token": "vault://ferreteria-lopez/wa-token",
+  "wa-app-secret": "vault://ferreteria-lopez/wa-app-secret",
+  "wa-verify": "vault://ferreteria-lopez/wa-verify",
+};
 
 function baseDeployment(): Deployment {
   return loadDeploymentFile(EXAMPLE);
@@ -142,7 +147,7 @@ describe("resolución de un despliegue", () => {
     d.bindings = {};
     d.connectors = [];
     d.credentials = {};
-    const r = resolveRelease({ template, deployment: d, catalogs: {}, credentialRefs: {} });
+    const r = resolveRelease({ template, deployment: d, catalogs: {}, credentialRefs: { "wa-token": "vault://x/a", "wa-app-secret": "vault://x/b", "wa-verify": "vault://x/c" } });
     expect(r.tools.map((t) => t.name)).toEqual(["conocimiento__buscar", "humano__escalar"]);
     expect(r.connectors).toEqual({});
   });
@@ -176,5 +181,35 @@ describe("render", () => {
   it("rellena rutas con puntos y falla si falta una variable", () => {
     expect(render("Hola {{ a.b }} y {{c}}", { a: { b: "x" }, c: [1, 2] })).toBe("Hola x y 1, 2");
     expect(() => render("{{nope}}", {})).toThrow(RenderError);
+  });
+});
+
+describe("canal WhatsApp", () => {
+  const withWhatsApp = baseDeployment; // el ejemplo de la ferretería ya activa WhatsApp
+
+  it("activar whatsapp exige su configuración", () => {
+    const d = { ...baseDeployment(), channel_settings: {} };
+    expect(issuesOf(() => resolveRelease({ template, deployment: d, catalogs, credentialRefs })).join()).toMatch(
+      /channel_settings\/whatsapp: el canal whatsapp necesita/,
+    );
+  });
+
+  it("el release lleva referencias a la bóveda, nunca secretos", () => {
+    const r = resolveRelease({ template, deployment: withWhatsApp(), catalogs, credentialRefs });
+    validateRelease(r);
+    expect(r.channel_settings?.whatsapp).toEqual({
+      phone_number_id: "555000111",
+      access_token_ref: "vault://ferreteria-lopez/wa-token",
+      app_secret_ref: "vault://ferreteria-lopez/wa-app-secret",
+      verify_token_ref: "vault://ferreteria-lopez/wa-verify",
+      reengagement_template: { name: "seguimiento_pedido", language: "es" },
+    });
+  });
+
+  it("credenciales de whatsapp ausentes en la bóveda son un error", () => {
+    const { "wa-token": _omit, ...sinToken } = credentialRefs;
+    expect(issuesOf(() => resolveRelease({ template, deployment: withWhatsApp(), catalogs, credentialRefs: sinToken })).join()).toMatch(
+      /credentials\/access_token: credencial 'wa-token' no disponible/,
+    );
   });
 });

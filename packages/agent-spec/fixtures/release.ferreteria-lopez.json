@@ -1,5 +1,5 @@
 {
-  "id": "rel_e3b58940b27142ad",
+  "id": "rel_5fc9fb00884a2fa3",
   "schema_version": 1,
   "tenant": {
     "slug": "ferreteria-lopez",
@@ -309,7 +309,8 @@
   "channels": [
     "widget",
     "api",
-    "mcp"
+    "mcp",
+    "whatsapp"
   ],
   "params": {
     "empresa": "Ferretería López",
@@ -327,5 +328,17 @@
   "knowledge_sources": [
     "./ferreteria-lopez-faq.md"
   ],
-  "webhooks": []
+  "webhooks": [],
+  "channel_settings": {
+    "whatsapp": {
+      "phone_number_id": "555000111",
+      "access_token_ref": "vault://ferreteria-lopez/wa-token",
+      "app_secret_ref": "vault://ferreteria-lopez/wa-app-secret",
+      "verify_token_ref": "vault://ferreteria-lopez/wa-verify",
+      "reengagement_template": {
+        "name": "seguimiento_pedido",
+        "language": "es"
+      }
+    }
+  }
 }

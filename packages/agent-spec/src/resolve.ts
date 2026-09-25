@@ -188,6 +188,29 @@ export function resolveRelease({ template, deployment, catalogs, credentialRefs 
   const channels = deployment.channels ?? allowedChannels.filter((c) => DEFAULT_CHANNELS.includes(c));
   for (const ch of channels) if (!allowedChannels.includes(ch)) add("/channels", `la plantilla no soporta el canal '${ch}'`);
 
+  // --- configuración de canales (solo referencias a la bóveda) ---
+  const channelSettings: Release["channel_settings"] = {};
+  if (channels.includes("whatsapp")) {
+    const wa = deployment.channel_settings?.whatsapp;
+    if (!wa) {
+      add("/channel_settings/whatsapp", "el canal whatsapp necesita phone_number_id y credenciales");
+    } else {
+      const refOf = (field: keyof typeof wa.credentials) => {
+        const name = wa.credentials[field];
+        const ref = credentialRefs[name];
+        if (!ref) add(`/channel_settings/whatsapp/credentials/${field}`, `credencial '${name}' no disponible en la bóveda`);
+        return ref ?? "";
+      };
+      channelSettings.whatsapp = {
+        phone_number_id: wa.phone_number_id,
+        access_token_ref: refOf("access_token"),
+        app_secret_ref: refOf("app_secret"),
+        verify_token_ref: refOf("verify_token"),
+        ...(wa.reengagement_template ? { reengagement_template: wa.reengagement_template } : {}),
+      };
+    }
+  }
+
   // --- conocimiento ---
   const knowledgeSources = (deployment.knowledge ?? []).map((k) => k.source);
   if (template.knowledge?.required && knowledgeSources.length === 0) {
@@ -240,6 +263,7 @@ export function resolveRelease({ template, deployment, catalogs, credentialRefs 
     params,
     knowledge_sources: knowledgeSources,
     webhooks,
+    ...(Object.keys(channelSettings).length ? { channel_settings: channelSettings } : {}),
   };
   return { id: `rel_${sha256(canonicalJson(body)).slice(0, 16)}`, ...body };
 }
