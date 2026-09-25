@@ -9,11 +9,12 @@ import {
 import type pg from "pg";
 import { assertTenantAdmin, generateApiKey, type Principal } from "../../shared/auth.js";
 import type { Db } from "../../shared/db.js";
-import { badRequest, forbidden, notFound } from "../../shared/errors.js";
+import { badRequest, forbidden, HttpError, notFound } from "../../shared/errors.js";
 import { audit } from "../audit/index.js";
 import { upsertConnector } from "../connectors/index.js";
 import type { RuntimeGateway } from "../conversations/index.js";
 import type { TemplateCatalog } from "../templates/index.js";
+import type { OAuthService } from "../oauth/index.js";
 import { Vault } from "../vault/index.js";
 
 export interface DeployRequest {
@@ -59,6 +60,7 @@ export class DeploymentService {
     private readonly vault: Vault,
     private readonly runtime: RuntimeGateway,
     private readonly publicBaseUrl: string,
+    private readonly oauth: OAuthService,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
@@ -74,6 +76,27 @@ export class DeploymentService {
     const { template } = this.templates.resolve(ref.id, ref.range);
     const tenant = await this.ensureTenant(principal, deployment.tenant.slug, deployment.tenant.name);
     assertTenantAdmin(principal, tenant.id);
+
+    // Credenciales OAuth sin conectar: se generan los enlaces (en su propia transacción, para que sobrevivan)
+    // y se responde 409 con ellos. El cliente autoriza y se vuelve a desplegar.
+    const oauthCreds = Object.entries(deployment.credentials ?? {}).filter(([, src]) => src.oauth);
+    if (oauthCreds.length && !req.dry_run) {
+      const pending = await this.db.withTenant(tenant.id, async (c) => {
+        const stored = new Set(await this.vault.names(c));
+        const links = [];
+        for (const [name, src] of oauthCreds) {
+          if (stored.has(name)) continue;
+          const scopes = (deployment.connectors ?? []).find((k) => k.auth?.credential === name)?.auth?.scopes;
+          links.push(await this.oauth.createConnectLink(c, tenant.id, name, src.oauth!, scopes, principal.kind));
+        }
+        return links;
+      });
+      if (pending.length) {
+        throw new HttpError(409, "faltan conexiones por autorizar: envía los enlaces al cliente y vuelve a desplegar", {
+          pending_connections: pending,
+        });
+      }
+    }
 
     const keys: DeployResponse["keys"] = {};
     let agent: { id: string; slug: string; name: string };
@@ -110,7 +133,8 @@ export class DeploymentService {
           const credName = conn.auth?.credential;
           if (credName && conn.type === "mcp") {
             const vaultName = deployment.credentials?.[credName]?.vault ?? credName;
-            secret = req.secrets?.[credName] ?? (stored.has(vaultName) ? await this.vault.get(c, tenant.id, vaultName) : undefined);
+            // oauth: access token vigente (renovado si hace falta); estático: el de la bóveda.
+            secret = req.secrets?.[credName] ?? (stored.has(vaultName) ? await this.oauth.resolveSecret(tenant.id, vaultName) : undefined);
           }
           catalogs[conn.id] = await upsertConnector(c, tenant.id, conn, req.connector_specs?.[conn.id], secret, this.fetchImpl);
         }
@@ -142,7 +166,9 @@ export class DeploymentService {
         }
 
         // API keys: se emiten una sola vez (solo se guarda el hash).
-        if (tenant.created) keys.admin = await this.issueKey(c, tenant.id, null, "admin");
+        // La key admin se emite en el primer despliegue que PUBLICA (no en uno que se quedó esperando conexiones).
+        const admins = await c.query("SELECT 1 FROM api_keys WHERE agent_id IS NULL AND kind = 'admin' AND revoked_at IS NULL");
+        if (!admins.rows[0]) keys.admin = await this.issueKey(c, tenant.id, null, "admin");
         const existing = await c.query("SELECT kind FROM api_keys WHERE agent_id = $1 AND revoked_at IS NULL", [a.id]);
         const kinds = new Set(existing.rows.map((r) => r.kind));
         if (!kinds.has("agent")) keys.agent = await this.issueKey(c, tenant.id, a.id, "agent");

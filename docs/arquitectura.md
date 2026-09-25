@@ -220,6 +220,9 @@ Ventana de 24 h controlada con `last_customer_at`: fuera de ella, plantilla apro
   otro tenant no ve nada, y sin tenant fijado la app no ve ninguna fila.
 - **Bóveda**: AES-256-GCM con clave maestra fuera de la BD y AAD = tenant+nombre. Interfaz pensada para
   sustituirse por HashiCorp Vault / KMS / Nango sin tocar el resto (fuera del módulo solo circulan referencias).
+- **Conexiones OAuth**: el cliente autoriza con su cuenta mediante un enlace de un solo uso (state aleatorio +
+  PKCE S256). Tokens cifrados en la bóveda; la renovación ocurre solo en el plano de control, con bloqueo de fila
+  para no renovar dos veces; `invalid_grant` marca la conexión para reconectar. Ver [ADR 0009](adr/0009-oauth-por-tenant.md).
 - **API keys** por tipo: `admin` (tenant), `agent` (servidor a servidor / MCP), `widget` (pública, solo chat con
   su agente). Solo se guarda el hash; se muestran una vez.
 - **Entrada no confiable**: mensajes de clientes y resultados de tools son datos, no instrucciones (reglas de
@@ -294,7 +297,7 @@ versión de regla/modelo.
 | Fase | Contenido |
 |---|---|
 | **1 ✔** | Plantilla atención al cliente · 4 capas · OpenAPI→tools · MCP entrada · widget · aprobaciones · handoff · RLS · bóveda · Temporal · CLI · evals · Helm |
-| **2 (en curso)** | ✔ Plantilla **agendar citas** (sin cambios en el motor) · ✔ conectores **MCP de salida** con descubrimiento `tools/list` al desplegar · ✔ hora del turno en la zona del cliente · ✔ **canal WhatsApp** (webhook firmado, deduplicación, ventana de 24 h, respuestas diferidas; [ADR 0008](adr/0008-canales-asincronos.md)) · pendiente: OAuth por tenant (Google/Outlook vía Nango), email, streaming SSE |
+| **2 (en curso)** | ✔ Plantilla **agendar citas** (sin cambios en el motor) · ✔ conectores **MCP de salida** con descubrimiento `tools/list` al desplegar · ✔ hora del turno en la zona del cliente · ✔ **canal WhatsApp** (webhook firmado, deduplicación, ventana de 24 h, respuestas diferidas; [ADR 0008](adr/0008-canales-asincronos.md)) · ✔ **conexiones OAuth por cliente** (enlace de un clic, PKCE, renovación automática con bloqueo, revocación; [ADR 0009](adr/0009-oauth-por-tenant.md)) · pendiente: email, streaming SSE |
 | 3 | Plantillas **inventario** y **CRM operado por agentes** · triggers por evento/cron (el agente actúa sin que nadie escriba) · virtual keys de LiteLLM por tenant automáticas · spans OTel GenAI |
 | 4 | Plantilla **conciliaciones**: motor determinista + LLM para excepciones + aprobaciones por lotes |
 | 5 | **Agentes autónomos** (L4-L5) con objetivos, presupuestos y memoria · multi-agente (un agente delega en otro vía A2A/MCP) · voz (LiveKit) · marketplace de plantillas · sandbox de código (E2B/Firecracker) para tools generadas |

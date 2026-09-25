@@ -76,7 +76,8 @@ class ToolExecutor:
         secret = await self.credentials.resolve(tenant_id, auth.credential_ref)
         if auth.type == "api_key":
             return {auth.header or "X-API-Key": secret}
-        if auth.type == "bearer":
+        if auth.type in ("bearer", "oauth2"):
+            # oauth2: el plano de control devuelve siempre un access token vigente (lo renueva si caducó).
             return {"Authorization": f"Bearer {secret}"}
         return {"Authorization": "Basic " + base64.b64encode(secret.encode()).decode()}
 

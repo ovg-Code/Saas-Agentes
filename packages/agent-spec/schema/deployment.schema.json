@@ -294,7 +294,8 @@
             "none",
             "api_key",
             "bearer",
-            "basic"
+            "basic",
+            "oauth2"
           ]
         },
         "header": {
@@ -304,6 +305,17 @@
         "credential": {
           "type": "string",
           "description": "Nombre en `credentials`."
+        },
+        "provider": {
+          "type": "string",
+          "description": "oauth2: id del proveedor en el catálogo de la plataforma (config/oauth-providers.yaml)"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "oauth2: permisos a pedir (por defecto, los del proveedor)"
         }
       }
     },
@@ -335,6 +347,10 @@
         "vault": {
           "type": "string",
           "description": "Referencia a una credencial ya existente en la bóveda."
+        },
+        "oauth": {
+          "type": "string",
+          "description": "Credencial que se obtiene cuando el cliente AUTORIZA con su cuenta (id del proveedor OAuth). La plataforma genera el enlace."
         }
       },
       "oneOf": [
@@ -346,6 +362,11 @@
         {
           "required": [
             "vault"
+          ]
+        },
+        {
+          "required": [
+            "oauth"
           ]
         }
       ]

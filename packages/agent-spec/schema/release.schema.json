@@ -395,7 +395,8 @@
                 "none",
                 "api_key",
                 "bearer",
-                "basic"
+                "basic",
+                "oauth2"
               ]
             },
             "header": {

@@ -60,7 +60,7 @@ class ReleaseTool(_Model):
 
 
 class ConnectorAuth(_Model):
-    type: Literal["none", "api_key", "bearer", "basic"]
+    type: Literal["none", "api_key", "bearer", "basic", "oauth2"]
     header: str | None = None
     credential_ref: str | None = None
 

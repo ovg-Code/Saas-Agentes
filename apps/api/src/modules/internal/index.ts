@@ -3,6 +3,7 @@ import { safeEqual } from "../../shared/auth.js";
 import type { Db } from "../../shared/db.js";
 import { unauthorized } from "../../shared/errors.js";
 import type { ConversationService, TurnResult } from "../conversations/index.js";
+import type { OAuthService } from "../oauth/index.js";
 import { Vault } from "../vault/index.js";
 
 /**
@@ -11,7 +12,7 @@ import { Vault } from "../vault/index.js";
  */
 export function registerInternalRoutes(
   app: FastifyInstance,
-  deps: { db: Db; vault: Vault; conversations: ConversationService; internalToken: string },
+  deps: { db: Db; vault: Vault; oauth: OAuthService; conversations: ConversationService; internalToken: string },
 ) {
   app.addHook("onRequest", async (req) => {
     if (!req.url.startsWith("/internal/")) return;
@@ -21,12 +22,13 @@ export function registerInternalRoutes(
 
   app.post<{ Body: { tenant_id: string; ref: string } }>("/internal/credentials/resolve", async (req) => {
     const { tenantSlug, name } = Vault.parseRef(req.body.ref);
-    const secret = await deps.db.withTenant(req.body.tenant_id, async (c) => {
-      // La referencia debe pertenecer al tenant que la pide (RLS + comprobación explícita del slug).
+    // La referencia debe pertenecer al tenant que la pide (RLS + comprobación explícita del slug).
+    await deps.db.withTenant(req.body.tenant_id, async (c) => {
       const { rows } = await c.query("SELECT slug FROM tenants WHERE id = $1", [req.body.tenant_id]);
       if (rows[0]?.slug !== tenantSlug) throw unauthorized("la credencial no pertenece a este tenant");
-      return deps.vault.get(c, req.body.tenant_id, name);
     });
+    // Secreto estático o access token OAuth vigente (renovado aquí si estaba a punto de caducar).
+    const secret = await deps.oauth.resolveSecret(req.body.tenant_id, name);
     return { secret };
   });
 

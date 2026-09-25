@@ -82,9 +82,12 @@ export interface ConnectorCatalog {
 // ---------- Capa 3: despliegue del cliente ----------
 
 export interface ConnectorAuth {
-  type: "none" | "api_key" | "bearer" | "basic";
+  type: "none" | "api_key" | "bearer" | "basic" | "oauth2";
   header?: string;
   credential?: string;
+  /** oauth2: proveedor del catálogo de la plataforma */
+  provider?: string;
+  scopes?: string[];
 }
 
 export interface DeploymentConnector {
@@ -103,7 +106,7 @@ export interface Deployment {
   params?: Record<string, unknown>;
   connectors?: DeploymentConnector[];
   bindings?: Record<string, { connector: string; operation?: string }>;
-  credentials?: Record<string, { from_env?: string; vault?: string }>;
+  credentials?: Record<string, { from_env?: string; vault?: string; oauth?: string }>;
   knowledge?: { source: string; title?: string }[];
   channels?: ChannelKind[];
   autonomy?: AutonomyLevel;

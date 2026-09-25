@@ -92,6 +92,15 @@ function callTool(name, args) {
   }
 }
 
+// Token fijo, o (si OAUTH_INTROSPECT_URL está definido) un access token OAuth vigente del proveedor simulado.
+async function authorized(header) {
+  if (header === `Bearer ${TOKEN}`) return true;
+  const introspect = process.env.OAUTH_INTROSPECT_URL;
+  if (!introspect || !header?.startsWith("Bearer ")) return false;
+  const r = await fetch(introspect, { method: "POST", body: new URLSearchParams({ token: header.slice(7) }) });
+  return (await r.json()).active === true;
+}
+
 function send(res, status, body, headers = {}) {
   res.writeHead(status, { "content-type": "application/json", ...headers });
   res.end(body === undefined ? "" : JSON.stringify(body));
@@ -137,7 +146,7 @@ const server = createServer(async (req, res) => {
     return res.end(readFileSync(new URL("./openapi.yaml", import.meta.url)));
   }
   if (url.pathname === "/_debug") return send(res, 200, { citas, cobros });
-  if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(res, 401, { error: "token inválido" });
+  if (!(await authorized(req.headers.authorization))) return send(res, 401, { error: "token inválido o caducado" });
 
   if (req.method === "POST" && url.pathname === "/mcp") return handleRpc(await readJson(req), req, res);
   if (req.method === "POST" && url.pathname === "/pagos/senal") {

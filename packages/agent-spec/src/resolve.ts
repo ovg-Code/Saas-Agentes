@@ -152,8 +152,18 @@ export function resolveRelease({ template, deployment, catalogs, credentialRefs 
     const c = depConnectors.get(id)!;
     const auth = c.auth ?? { type: "none" as const };
     let credential_ref: string | undefined;
+    if (auth.type === "oauth2") {
+      const src = auth.credential ? deployment.credentials?.[auth.credential] : undefined;
+      if (!auth.provider) add(`/connectors/${id}/auth`, "oauth2 necesita 'provider'");
+      else if (src && src.oauth !== auth.provider) {
+        add(`/connectors/${id}/auth`, `la credencial '${auth.credential}' debe declararse como { oauth: ${auth.provider} }`);
+      }
+    }
     if (auth.type !== "none") {
       if (!auth.credential) add(`/connectors/${id}/auth`, "falta 'credential'");
+      else if (!credentialRefs[auth.credential] && deployment.credentials?.[auth.credential]?.oauth) {
+        add(`/connectors/${id}/auth`, `la cuenta de '${auth.credential}' aún no está conectada: el cliente debe autorizar el acceso`);
+      }
       else if (!credentialRefs[auth.credential]) add(`/connectors/${id}/auth`, `credencial '${auth.credential}' no disponible en la bóveda`);
       else credential_ref = credentialRefs[auth.credential];
     }

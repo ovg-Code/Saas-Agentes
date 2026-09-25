@@ -19,6 +19,7 @@ ENV NODE_ENV=production TEMPLATES_DIR=/app/templates MIGRATIONS_DIR=/app/db/migr
 COPY --from=build /out apps/api
 COPY templates templates
 COPY db db
+COPY config config
 USER node
 EXPOSE 8080
 CMD ["node", "apps/api/dist/main.js"]

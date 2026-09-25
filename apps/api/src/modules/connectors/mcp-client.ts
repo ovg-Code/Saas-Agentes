@@ -20,7 +20,7 @@ let nextId = 1;
 export function authHeaders(auth: ConnectorAuth | undefined, secret: string | undefined): Record<string, string> {
   if (!auth || auth.type === "none" || !secret) return {};
   if (auth.type === "api_key") return { [auth.header ?? "X-API-Key"]: secret };
-  if (auth.type === "bearer") return { authorization: `Bearer ${secret}` };
+  if (auth.type === "bearer" || auth.type === "oauth2") return { authorization: `Bearer ${secret}` };
   return { authorization: `Basic ${Buffer.from(secret).toString("base64")}` };
 }
 

@@ -22,6 +22,31 @@
 8. **Operación** — su equipo usa `/console` con la key admin: aprobaciones pendientes, conversaciones,
    respuesta humana en handoffs, probador.
 
+## Conectar Google, Microsoft 365, HubSpot… (OAuth)
+
+Cuando el sistema del cliente exige que **autorice con su cuenta**, el conector usa `oauth2`:
+
+```yaml
+connectors:
+  - id: agenda
+    type: mcp
+    url: https://mcp-calendar.example.com/mcp
+    auth: { type: oauth2, provider: google, credential: agenda-google, scopes: [https://www.googleapis.com/auth/calendar.events] }
+credentials:
+  agenda-google: { oauth: google }
+```
+
+1. `agentes deploy cliente.yaml` → como la cuenta aún no está conectada, **devuelve un enlace** (un solo uso,
+   30 minutos). Envíaselo al cliente: no le da acceso a la plataforma, solo le lleva a la pantalla de Google.
+2. El cliente acepta los permisos y ve "Cuenta conectada".
+3. `agentes deploy cliente.yaml` otra vez → publicado.
+
+A partir de ahí la plataforma renueva los tokens sola. Si el cliente retira el permiso desde su cuenta, el
+agente responde que no ha podido acceder, `/v1/connections` la marca con `needs_reconnect` y el siguiente
+despliegue vuelve a generar el enlace. Proveedores disponibles: `GET /v1/oauth/providers` (catálogo en
+`config/oauth-providers.yaml`; cada uno necesita `OAUTH_<ID>_CLIENT_ID/_CLIENT_SECRET` en la plataforma).
+Ejemplo completo con un proveedor simulado: [`clinica-sonrisas-google.yaml`](../examples/clientes/clinica-sonrisas-google.yaml).
+
 ## Activar WhatsApp
 
 1. Pide al cliente (o créalo con él en Meta Business): el **número** dado de alta en WhatsApp Business Cloud API,

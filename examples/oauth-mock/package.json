@@ -1,0 +1,8 @@
+{
+  "name": "@agentes/oauth-mock",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Proveedor OAuth2 simulado (authorization code + PKCE + refresh con rotación) para demos y tests",
+  "scripts": { "start": "node server.mjs" }
+}

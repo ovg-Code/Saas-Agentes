@@ -7,7 +7,8 @@ import { parse as parseYaml } from "yaml";
 const HELP = `agentes — despliega y prueba agentes de IA a partir de plantillas
 
 Uso:
-  agentes deploy <cliente.yaml> [--dry-run]     Despliega (o actualiza) un cliente en un paso
+  agentes deploy <cliente.yaml> [--dry-run]     Despliega (o actualiza) un cliente en un paso. Si alguna cuenta
+                                                necesita autorización (OAuth), muestra los enlaces para el cliente
   agentes eval --agent <id> --template <dir>    Ejecuta las evals golden de la plantilla contra el agente
   agentes chat --agent <id> "<mensaje>"         Envía un mensaje (reutiliza --conversation <id>)
   agentes templates                             Lista las plantillas disponibles
@@ -39,16 +40,28 @@ function parseArgs(argv: string[]): Args {
 const API = (process.env.AGENTES_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
 const c = { bold: (s: string) => `\x1b[1m${s}\x1b[0m`, green: (s: string) => `\x1b[32m${s}\x1b[0m`, red: (s: string) => `\x1b[31m${s}\x1b[0m`, dim: (s: string) => `\x1b[2m${s}\x1b[0m`, yellow: (s: string) => `\x1b[33m${s}\x1b[0m` };
 
+class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly details: unknown,
+  ) {
+    super(message);
+  }
+}
+
 async function call<T>(method: string, path: string, token: string | undefined, body?: unknown): Promise<T> {
   const r = await fetch(`${API}${path}`, {
     method,
     headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  const data = (await r.json().catch(() => ({}))) as T & { error?: string; details?: { path: string; message: string }[] };
+  const data = (await r.json().catch(() => ({}))) as T & { error?: string; details?: unknown };
   if (!r.ok) {
-    const details = data.details?.map((d) => `  - ${d.path}: ${d.message}`).join("\n");
-    throw new Error(`${data.error ?? `HTTP ${r.status}`}${details ? `\n${details}` : ""}`);
+    const details = Array.isArray(data.details)
+      ? (data.details as { path: string; message: string }[]).map((d) => `  - ${d.path}: ${d.message}`).join("\n")
+      : "";
+    throw new ApiError(`${data.error ?? `HTTP ${r.status}`}${details ? `\n${details}` : ""}`, r.status, data.details);
   }
   return data;
 }
@@ -103,13 +116,27 @@ async function deploy(args: Args) {
     endpoints: Record<string, string>;
     dry_run: boolean;
   };
-  const res = await call<Res>("POST", "/v1/deploy", process.env.AGENTES_TOKEN, {
-    deployment,
-    connector_specs,
-    secrets,
-    knowledge,
-    dry_run: Boolean(args["dry-run"]),
-  });
+  let res: Res;
+  try {
+    res = await call<Res>("POST", "/v1/deploy", process.env.AGENTES_TOKEN, {
+      deployment,
+      connector_specs,
+      secrets,
+      knowledge,
+      dry_run: Boolean(args["dry-run"]),
+    });
+  } catch (e) {
+    const pending = (e instanceof ApiError && e.status === 409
+      ? (e.details as { pending_connections?: { credential: string; provider: string; connect_url: string; expires_at: string }[] })?.pending_connections
+      : undefined);
+    if (!pending) throw e;
+    console.log(`\n${c.yellow("⏸")} ${c.bold("Falta que el cliente autorice el acceso a sus cuentas.")}`);
+    console.log("  Envíale estos enlaces (un solo uso, caducan en 30 min):\n");
+    for (const p of pending) console.log(`   ${p.credential} (${p.provider})\n   ${c.bold(p.connect_url)}\n`);
+    console.log(`  Cuando los haya abierto y aceptado, vuelve a ejecutar: ${c.bold(`agentes deploy ${file}`)}`);
+    process.exitCode = 3;
+    return;
+  }
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
 
   console.log(`\n${c.green("✔")} ${c.bold(res.agent.name)} ${res.dry_run ? c.yellow("(dry-run, nada publicado)") : ""}`);

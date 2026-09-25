@@ -1,0 +1,37 @@
+# La misma clínica, pero su agenda exige que el cliente AUTORICE con su cuenta (OAuth2), como Google Calendar,
+# Outlook o HubSpot. Aquí el proveedor es `mock` (examples/oauth-mock) para probar sin cuentas reales; en
+# producción sería `provider: google` con un servidor MCP de Google Calendar.
+#
+#   1. agentes deploy clinica-sonrisas-google.yaml   -> devuelve un enlace de conexión
+#   2. el cliente abre el enlace y autoriza          -> la conexión queda guardada cifrada
+#   3. agentes deploy clinica-sonrisas-google.yaml   -> publicado; los tokens se renuevan solos
+tenant:
+  slug: clinica-sonrisas-google
+  name: Clínica Dental Sonrisas
+agent:
+  slug: citas
+  name: Asistente de citas de Clínica Sonrisas
+template: agendar-citas@^1.0
+
+params:
+  empresa: Clínica Dental Sonrisas
+  servicios: [revisión, limpieza, blanqueamiento, urgencia]
+  zona_horaria: Europe/Madrid
+
+connectors:
+  - id: agenda
+    type: mcp
+    url: http://localhost:9091/mcp
+    auth: { type: oauth2, provider: mock, credential: agenda-google, scopes: [calendar.events] }
+
+bindings:
+  calendario.disponibilidad: { connector: agenda, operation: consultar_disponibilidad }
+  calendario.crear_cita: { connector: agenda, operation: crear_cita }
+  calendario.buscar_citas: { connector: agenda, operation: buscar_citas }
+  calendario.cancelar_cita: { connector: agenda, operation: cancelar_cita }
+
+credentials:
+  agenda-google: { oauth: mock }
+
+channels: [widget, api, mcp]
+autonomy: L3

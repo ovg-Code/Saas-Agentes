@@ -36,18 +36,27 @@ export class Vault {
   }
 
   /** `c` debe ser una conexión con el tenant fijado (RLS). El AAD ata el cifrado al tenant+nombre. */
-  async put(c: pg.PoolClient, tenantId: string, name: string, secret: string): Promise<void> {
+  async put(
+    c: pg.PoolClient,
+    tenantId: string,
+    name: string,
+    secret: string,
+    meta: { kind?: "secret" | "oauth"; provider?: string; scopes?: string[]; expiresAt?: Date | null } = {},
+  ): Promise<void> {
     const { ciphertext, iv, tag } = this.encrypt(secret, `${tenantId}:${name}`);
     await c.query(
-      `INSERT INTO credentials (tenant_id, name, ciphertext, iv, tag) VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO credentials (tenant_id, name, ciphertext, iv, tag, kind, provider, scopes, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (tenant_id, name) DO UPDATE SET ciphertext = EXCLUDED.ciphertext, iv = EXCLUDED.iv,
-         tag = EXCLUDED.tag, rotated_at = now()`,
-      [tenantId, name, ciphertext, iv, tag],
+         tag = EXCLUDED.tag, kind = EXCLUDED.kind, provider = EXCLUDED.provider, scopes = EXCLUDED.scopes,
+         expires_at = EXCLUDED.expires_at, needs_reconnect = false, rotated_at = now()`,
+      [tenantId, name, ciphertext, iv, tag, meta.kind ?? "secret", meta.provider ?? null, meta.scopes ?? null, meta.expiresAt ?? null],
     );
   }
 
   async names(c: pg.PoolClient): Promise<string[]> {
-    const { rows } = await c.query("SELECT name FROM credentials ORDER BY name");
+    // Una conexión OAuth revocada no cuenta como disponible: el despliegue pedirá reconectar.
+    const { rows } = await c.query("SELECT name FROM credentials WHERE NOT needs_reconnect ORDER BY name");
     return rows.map((r) => r.name);
   }
 

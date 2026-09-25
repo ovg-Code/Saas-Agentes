@@ -68,6 +68,8 @@ importers:
 
   examples/crm-mock: {}
 
+  examples/oauth-mock: {}
+
   examples/whatsapp-mock: {}
 
   packages/agent-spec:

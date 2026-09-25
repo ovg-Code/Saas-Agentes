@@ -12,6 +12,7 @@ export PLATFORM_ADMIN_TOKEN="${PLATFORM_ADMIN_TOKEN:-e2e-platform-token}"
 export VAULT_MASTER_KEY="${VAULT_MASTER_KEY:-$(openssl rand -base64 32)}"
 export INTERNAL_TOKEN="${INTERNAL_TOKEN:-e2e-internal}"
 export API_PORT=18080 RUNTIME_URL=http://localhost:18090 PUBLIC_BASE_URL=http://localhost:18080
+export OAUTH_MOCK_URL=http://localhost:9093 OAUTH_MOCK_CLIENT_ID=agentes-dev OAUTH_MOCK_CLIENT_SECRET=agentes-dev-secret
 export WHATSAPP_API_BASE=http://localhost:9092 WA_ACCESS_TOKEN=wa-demo-token WA_APP_SECRET=wa-demo-secret WA_VERIFY_TOKEN=wa-demo-verify
 export AGENTES_API_URL=http://localhost:18080
 
@@ -24,13 +25,15 @@ cleanup() {
   pkill -f "crm-mock/server[.]mjs" 2>/dev/null || true
   pkill -f "agenda-mock/server[.]mjs" 2>/dev/null || true
   pkill -f "whatsapp-mock/server[.]mjs" 2>/dev/null || true
-  rm -f "$ROOT/examples/clientes/.e2e.yaml" "$ROOT/examples/clientes/.e2e-citas.yaml"
+  pkill -f "oauth-mock/server[.]mjs" 2>/dev/null || true
+  rm -f "$ROOT/examples/clientes/.e2e.yaml" "$ROOT/examples/clientes/.e2e-citas.yaml" "$ROOT/examples/clientes/.e2e-google.yaml"
   [ "${E2E_OK:-0}" = 1 ] || echo "logs en $LOGS"
 }
 trap cleanup EXIT
 
 CRM_API_KEY=crm-demo-key PORT=9090 node examples/crm-mock/server.mjs >"$LOGS/crm.log" 2>&1 &
-AGENDA_TOKEN=agenda-demo-token PORT=9091 node examples/agenda-mock/server.mjs >"$LOGS/agenda.log" 2>&1 &
+OAUTH_CLIENT_ID=agentes-dev OAUTH_CLIENT_SECRET=agentes-dev-secret ACCESS_TTL=61 PORT=9093 node examples/oauth-mock/server.mjs >"$LOGS/oauth.log" 2>&1 &
+OAUTH_INTROSPECT_URL=http://localhost:9093/introspect AGENDA_TOKEN=agenda-demo-token PORT=9091 node examples/agenda-mock/server.mjs >"$LOGS/agenda.log" 2>&1 &
 PORT=9092 node examples/whatsapp-mock/server.mjs >"$LOGS/whatsapp.log" 2>&1 &
 # espera hasta que un comando tenga éxito (canales asíncronos: la respuesta no vuelve en la petición)
 wait_for() { for _ in $(seq 1 50); do eval "$1" >/dev/null 2>&1 && return 0; sleep 0.2; done; echo "timeout esperando: $1"; return 1; }
@@ -136,6 +139,28 @@ curl -sS --fail-with-body -X POST "$AGENTES_API_URL/v1/approvals/$APPROVAL" -H "
 wait_for 'curl -sf http://localhost:9092/_debug | grep -q "pedido[^,]*1002"'
 echo "resultado del reembolso enviado por WhatsApp:"
 curl -sf http://localhost:9092/_debug | json 'j.sent.at(-1).text.body'
+
+echo "== 9. Conexión OAuth: el cliente autoriza su agenda con un clic y los tokens se renuevan solos =="
+sed "s/slug: clinica-sonrisas-google/slug: $SLUG-google/" examples/clientes/clinica-sonrisas-google.yaml > examples/clientes/.e2e-google.yaml
+set +e
+OUT3=$(AGENTES_TOKEN=$PLATFORM_ADMIN_TOKEN node apps/cli/bin/agentes.js deploy examples/clientes/.e2e-google.yaml); RC=$?
+set -e
+echo "$OUT3"
+test "$RC" = 3
+LINK=$(echo "$OUT3" | grep -o 'http://[^ ]*/v1/oauth/start/[A-Za-z0-9_-]*' | head -1)
+echo "-> el cliente abre el enlace y acepta:"
+curl -sfL "$LINK" | grep -o "Tu cuenta de [^.]*\. [^<]*"
+OUT3=$(AGENTES_TOKEN=$PLATFORM_ADMIN_TOKEN node apps/cli/bin/agentes.js deploy examples/clientes/.e2e-google.yaml)
+echo "$OUT3" | grep -E "release|calendario__crear_cita"
+G_KEY=$(echo "$OUT3" | sed -n 's/^ *agent *\(ak_[^ ]*\).*/\1/p')
+G_ID=$(echo "$OUT3" | sed -n 's#.*/v1/agents/\([0-9a-f-]*\)/chat.*#\1#p' | head -1)
+AGENTES_TOKEN=$G_KEY node apps/cli/bin/agentes.js chat --agent "$G_ID" "Quiero reservar mañana a las 12:00, soy Rosa Vidal" | tail -1
+sleep 2   # el access token entra en su último minuto de vida -> la plataforma lo renueva sola
+R=$(AGENTES_TOKEN=$G_KEY node apps/cli/bin/agentes.js chat --agent "$G_ID" "Quiero reservar mañana a las 12:30, soy Rosa Vidal")
+echo "$R" | tail -1
+echo "$R" | grep -q "12:30"
+test "$(curl -sf http://localhost:9093/_debug | json 'j.refreshes')" -ge 1
+echo "renovaciones de token realizadas por la plataforma: $(curl -sf http://localhost:9093/_debug | json 'j.refreshes')"
 
 E2E_OK=1
 echo -e "\n✔ E2E completado"

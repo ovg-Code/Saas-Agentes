@@ -146,3 +146,16 @@ async def test_fake_llm_entiende_horas(release_citas, ctx, text, expected):
     agenda = AgendaMock()
     await Engine(release_citas, ctx, effects_for(agenda)).run(ConversationState(), UserMessage(text=f"Quiero reservar mañana {text}"))
     assert agenda.citas[0]["hora"] == expected
+
+
+async def test_conector_oauth2_usa_bearer_con_el_token_vigente(release_citas, ctx):
+    agenda = AgendaMock()
+    connectors = {**release_citas.connectors}
+    connectors["agenda"] = connectors["agenda"].model_copy(
+        update={"auth": connectors["agenda"].auth.model_copy(update={"type": "oauth2"})})
+    rel = release_citas.model_copy(update={"connectors": connectors})
+    _, r = await Engine(rel, ctx, effects_for(agenda)).run(
+        ConversationState(), UserMessage(text="Quiero reservar mañana a las 12:00"))
+    assert r.tools_executed == ["calendario__crear_cita"]
+    call = next(q for q in agenda.requests if b"tools/call" in q.content)
+    assert call.headers["authorization"] == f"Bearer {TOKEN}"

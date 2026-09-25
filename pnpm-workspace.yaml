@@ -4,3 +4,4 @@ packages:
   - "examples/crm-mock"
   - "examples/agenda-mock"
   - "examples/whatsapp-mock"
+  - "examples/oauth-mock"
